@@ -20,6 +20,8 @@ from config import (
     DEFAULT_RESUME_TRANSFER,
     DEFAULT_SJF_SCHEDULING,
     DEFAULT_BUNDLE_SIZE,
+    DEFAULT_REFRESH_INTERVAL,
+    DEFAULT_AUTO_CONNECT_WIFI,
 )
 from core.transfer import TransferManager
 from utils.adb import Adb
@@ -58,7 +60,7 @@ class SettingsWindow(tk.Toplevel):
     def __init__(self, master=None, config=None):
         super().__init__(master)
         self.title("Paramètres - Optimisations v2")
-        self.geometry("650x900")  # Taller window to show more settings
+        self.geometry("650x950")  # Taller window to show more settings
         self.config = config
 
         self.create_widgets()
@@ -156,7 +158,24 @@ class SettingsWindow(tk.Toplevel):
         self.aggressive_temp_cleanup = tk.BooleanVar(value=self.config.get("aggressive_temp_cleanup", True))
 
         # ═══════════════════════════════════════════════════════════════
-        # SECTION 3: MODE RAPIDE
+        # SECTION 3: WIFI & APPAREILS
+        # ═══════════════════════════════════════════════════════════════
+        section_wifi = tk.Label(scrollable_frame, text="━━━ WiFi & Appareils ━━━", font=("Arial", 11, "bold"), fg="#2196F3")
+        section_wifi.pack(pady=(20, 10))
+
+        # Refresh Interval
+        refresh_frame = tk.Frame(scrollable_frame)
+        refresh_frame.pack(pady=5, padx=20, fill=tk.X)
+        tk.Label(refresh_frame, text="Rafraîchissement liste (ms):").pack(side=tk.LEFT)
+        self.refresh_interval = tk.IntVar(value=self.config.get("refresh_interval", DEFAULT_REFRESH_INTERVAL))
+        tk.Entry(refresh_frame, textvariable=self.refresh_interval, width=10).pack(side=tk.RIGHT)
+
+        # Auto-connect WiFi
+        self.auto_connect_wifi = tk.BooleanVar(value=self.config.get("auto_connect_wifi", DEFAULT_AUTO_CONNECT_WIFI))
+        tk.Checkbutton(scrollable_frame, text="Connecter automatiquement (appareils connus)", variable=self.auto_connect_wifi).pack(anchor="w", padx=20, pady=3)
+
+        # ═══════════════════════════════════════════════════════════════
+        # SECTION 4: MODE RAPIDE
         # ═══════════════════════════════════════════════════════════════
         section_fast = tk.Label(scrollable_frame, text="━━━ Mode Rapide ━━━", font=("Arial", 11, "bold"), fg="#9C27B0")
         section_fast.pack(pady=(20, 10))
@@ -178,9 +197,9 @@ class SettingsWindow(tk.Toplevel):
         tk.Checkbutton(scrollable_frame, text="Ignorer vérification des tailles", variable=self.skip_size_verification).pack(anchor="w", padx=20, pady=3)
 
         # ═══════════════════════════════════════════════════════════════
-        # SECTION 4: APPAREIL
+        # SECTION 5: APPAREIL (SECURITE)
         # ═══════════════════════════════════════════════════════════════
-        section3 = tk.Label(scrollable_frame, text="━━━ Appareil ━━━", font=("Arial", 11, "bold"), fg="#FF9800")
+        section3 = tk.Label(scrollable_frame, text="━━━ Sécurité & Système ━━━", font=("Arial", 11, "bold"), fg="#FF9800")
         section3.pack(pady=(20, 10))
 
         # Use ADB Shell mode (replaces Termux option - clearer)
@@ -250,6 +269,10 @@ class SettingsWindow(tk.Toplevel):
         self.config["skip_early_verification"] = self.skip_early_verification.get()
         self.config["trust_local_chunks"] = self.trust_local_chunks.get()
         self.config["skip_size_verification"] = self.skip_size_verification.get()
+        # WiFi settings
+        self.config["refresh_interval"] = self.refresh_interval.get()
+        self.config["auto_connect_wifi"] = self.auto_connect_wifi.get()
+        
         self.master.save_config()
         self.destroy()
 
@@ -288,6 +311,20 @@ class Application(tk.Frame):
 
         self.check_adb_and_populate_devices()
         self.check_and_install_termux_on_devices()
+        
+        # Initialize auto-refresh variables
+        self.device_refresh_interval = self.config.get("refresh_interval", DEFAULT_REFRESH_INTERVAL)
+        self.previous_device_ids = set()
+        self.device_details = {} # Store details keyed by ID
+        self.is_transferring = False # Flag to pause device polling during transfer
+        
+        # Start auto-refresh thread
+        self._start_device_auto_refresh()
+        
+        # Connect to saved WiFi devices
+        if self.config.get("auto_connect_wifi", True):
+            self._connect_saved_wifi_devices()
+            
         self.source_dir.set(self.config.get("source_dir", ""))
         self.target_dir.set(self.config.get("target_dir", ""))
     
@@ -350,6 +387,11 @@ class Application(tk.Frame):
         config.setdefault("resume_transfer", DEFAULT_RESUME_TRANSFER)
         config.setdefault("sjf_scheduling", DEFAULT_SJF_SCHEDULING)
         config.setdefault("bundle_size", DEFAULT_BUNDLE_SIZE)
+        
+        # WiFi defaults
+        config.setdefault("refresh_interval", DEFAULT_REFRESH_INTERVAL)
+        config.setdefault("auto_connect_wifi", DEFAULT_AUTO_CONNECT_WIFI)
+        config.setdefault("saved_wifi_ips", [])
 
         return config
 
@@ -409,6 +451,32 @@ class Application(tk.Frame):
         clear_button = tk.Button(button_frame, text="Désélectionner", command=self.clear_device_selection)
         clear_button.pack(pady=2)
 
+        # WiFi connection frame
+        wifi_frame = tk.Frame(device_frame, bd=1, relief=tk.RIDGE)
+        wifi_frame.pack(side=tk.LEFT, padx=10, pady=5, fill=tk.Y)
+        
+        tk.Label(wifi_frame, text="Connexion WiFi", font=("Arial", 8, "bold")).pack(side=tk.TOP, pady=2)
+
+        wifi_input_frame = tk.Frame(wifi_frame)
+        wifi_input_frame.pack(fill=tk.X, padx=5)
+        
+        tk.Label(wifi_input_frame, text="IP:").pack(side=tk.LEFT)
+        self.wifi_ip_entry = tk.Entry(wifi_input_frame, width=15)
+        self.wifi_ip_entry.pack(side=tk.LEFT, padx=2)
+        self.wifi_ip_entry.insert(0, "192.168.1.")
+        
+        wifi_btn_frame = tk.Frame(wifi_frame)
+        wifi_btn_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        self.wifi_connect_button = tk.Button(wifi_btn_frame, text="Connecter WiFi", command=self.connect_wifi_device, bg="#E3F2FD")
+        self.wifi_connect_button.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # Switch to WiFi button
+        self.switch_wifi_button = tk.Button(wifi_btn_frame, text="🔌 ➔ 📶", command=self.switch_usb_to_wifi, bg="#E8F5E9")
+        self.switch_wifi_button.pack(side=tk.LEFT, padx=(5,0))
+        # Add tooltip
+        # ToolTip(self.switch_wifi_button, "Basculer l'appareil USB sélectionné en WiFi")
+
 
         # Source directory selection
         source_frame = tk.Frame(self, bd=2, relief=tk.GROOVE)
@@ -436,6 +504,17 @@ class Application(tk.Frame):
         # Transfer button
         self.transfer_button = tk.Button(self, text="Démarrer le Transfert", command=self.start_transfer_thread)
         self.transfer_button.pack(pady=10)
+
+        # Cancel button (hidden by default)
+        self.cancel_button = tk.Button(
+            self,
+            text="❌ Annuler l'opération",
+            command=self._cancel_current_operation,
+            bg="#FF5252",
+            fg="white",
+            font=("Arial", 10, "bold")
+        )
+        # Don't pack yet - will be shown during transfer
 
         # Additional action buttons frame
         action_buttons_frame = tk.Frame(self)
@@ -523,20 +602,215 @@ class Application(tk.Frame):
 
         self.logger.info("=== Vérification Termux terminée ===\n")
 
-    def populate_devices(self):
-        """Populate the device listbox with connected devices."""
-        devices = self.adb.get_devices()
-        self.all_devices = devices
+    def populate_devices(self, show_warning=True):
+        """Populate the device listbox with connected devices (USB + WiFi)."""
+        devices = self.adb.get_devices_detailed()
+        self.all_devices = [d["id"] for d in devices]
+        self.device_details = {d["id"]: d for d in devices}
+
+        # Preserve selection if possible
+        selected_ids = []
+        try:
+            current_selection = self.device_listbox.curselection()
+            # This might be tricky if list changed, but we try
+            # Actually, better to just clear and re-populate
+            # For preservation, we rely on _update_device_list logic
+            pass 
+        except:
+            pass
 
         # Clear listbox
         self.device_listbox.delete(0, tk.END)
 
         if devices:
             for device in devices:
-                self.device_listbox.insert(tk.END, device)
+                self.device_listbox.insert(tk.END, device["display_name"])
             self.logger.info(f"{len(devices)} appareil(s) trouvé(s).")
-        else:
+        elif show_warning:
             messagebox.showwarning("Aucun appareil", "Aucun appareil ADB n'a été trouvé.")
+
+    def _start_device_auto_refresh(self):
+        """Start background auto-refresh of device list."""
+        self._refresh_devices_background()
+
+    def _refresh_devices_background(self):
+        """Refresh device list in background without blocking UI."""
+        # Skip refresh if transfer is in progress
+        if self.is_transferring:
+            # Still schedule next refresh, but skip this one
+            interval = getattr(self, "device_refresh_interval", 3000)
+            self.master.after(interval, self._refresh_devices_background)
+            return
+
+        def refresh():
+            try:
+                # Use detailed method to detect changes in type/model too
+                devices = self.adb.get_devices_detailed()
+                # Create a signature of the current state
+                current_signature = set((d["id"], d["display_name"]) for d in devices)
+                
+                # Check if changed
+                if current_signature != self.previous_device_ids:
+                    self.previous_device_ids = current_signature
+                    self.master.after(0, lambda: self._update_device_list(devices))
+            except Exception as e:
+                pass # Fail silently in background thread
+
+        # Run in thread
+        threading.Thread(target=refresh, daemon=True).start()
+
+        # Schedule next refresh
+        interval = getattr(self, "device_refresh_interval", 3000)
+        self.master.after(interval, self._refresh_devices_background)
+
+    def _update_device_list(self, devices: list):
+        """Update device listbox from main thread."""
+        # Remember current selection (by ID)
+        selected_indices = list(self.device_listbox.curselection())
+        selected_ids = [self.all_devices[i] for i in selected_indices if i < len(self.all_devices)]
+
+        # Update data structures
+        self.all_devices = [d["id"] for d in devices]
+        self.device_details = {d["id"]: d for d in devices}
+
+        # Update listbox
+        self.device_listbox.delete(0, tk.END)
+        for device in devices:
+            self.device_listbox.insert(tk.END, device["display_name"])
+
+        # Restore selection
+        for i, device_id in enumerate(self.all_devices):
+            if device_id in selected_ids:
+                self.device_listbox.selection_set(i)
+
+    def _connect_saved_wifi_devices(self):
+        """Try to connect to saved WiFi IPs on startup."""
+        saved_ips = self.config.get("saved_wifi_ips", [])
+        if not saved_ips:
+            return
+            
+        self.logger.info(f"Tentative de reconnexion à {len(saved_ips)} appareils WiFi sauvegardés...")
+        
+        def connect_saved():
+            for ip in saved_ips:
+                self.adb.connect_wifi(ip)
+            # Trigger refresh after attempts
+            self.master.after(1000, lambda: self.populate_devices(show_warning=False))
+            
+        threading.Thread(target=connect_saved, daemon=True).start()
+
+    def connect_wifi_device(self):
+        """Connect to a WiFi device by IP address."""
+        ip = self.wifi_ip_entry.get().strip()
+
+        if not ip:
+            messagebox.showerror("Erreur", "Veuillez entrer une adresse IP.")
+            return
+
+        # Basic validation
+        if len(ip.split(".")) != 4:
+            messagebox.showerror("Erreur", "Format IP invalide. Exemple: 192.168.1.100")
+            return
+
+        self.logger.info(f"Connexion à {ip}:5555...")
+
+        def connect():
+            if self.adb.connect_wifi(ip):
+                self.logger.success(f"Connecté à {ip}:5555")
+                
+                # Save IP if auto-connect is enabled
+                if self.config.get("auto_connect_wifi", True):
+                    saved_ips = self.config.get("saved_wifi_ips", [])
+                    if ip not in saved_ips:
+                        saved_ips.append(ip)
+                        self.config["saved_wifi_ips"] = saved_ips
+                        self.save_config() # Save immediately
+                
+                self.master.after(0, lambda: self.populate_devices(show_warning=False))
+            else:
+                self.logger.error(f"Échec de connexion à {ip}:5555")
+                self.master.after(0, lambda: messagebox.showerror(
+                    "Erreur",
+                    f"Impossible de se connecter à {ip}:5555.\n\n"
+                    "Vérifiez que:\n"
+                    "• L'appareil est sur le même réseau\n"
+                    "• Le débogage WiFi est activé (ou 'adb tcpip 5555' effectué)\n"
+                    "• Le port 5555 est ouvert"
+                ))
+
+        threading.Thread(target=connect, daemon=True).start()
+
+    def switch_usb_to_wifi(self):
+        """Switch selected USB device to WiFi mode."""
+        devices = self.get_selected_devices()
+        if not devices:
+            messagebox.showwarning("Info", "Sélectionnez un appareil USB connecté.")
+            return
+            
+        if len(devices) > 1:
+            messagebox.showwarning("Info", "Sélectionnez un seul appareil pour cette opération.")
+            return
+            
+        device_id = devices[0]
+        
+        # Check if already WiFi
+        if ":" in device_id and "." in device_id:
+            messagebox.showinfo("Info", "Cet appareil semble déjà connecté en WiFi.")
+            return
+            
+        self.logger.info(f"[{device_id}] Tentative de basculement en WiFi...")
+        
+        def switch_process():
+            # 1. Get IP
+            ip = self.adb.get_device_ip(device_id)
+            if not ip:
+                self.logger.error(f"[{device_id}] Impossible de détecter l'IP WiFi.")
+                self.master.after(0, lambda: messagebox.showerror(
+                    "Erreur", 
+                    "Impossible de détecter l'adresse IP de l'appareil.\n\n"
+                    "Vérifiez que:\n"
+                    "1. Le WiFi est activé sur l'appareil\n"
+                    "2. L'appareil est connecté au même réseau que ce PC"
+                ))
+                return
+                
+            self.logger.info(f"[{device_id}] IP détectée: {ip}")
+            
+            # 2. Enable TCP/IP
+            if not self.adb.enable_tcpip(device_id):
+                self.logger.error(f"[{device_id}] Échec de l'activation TCP/IP.")
+                return
+                
+            time.sleep(1) # Wait a bit for restart
+            
+            # 3. Connect
+            if self.adb.connect_wifi(ip):
+                self.logger.success(f"[{device_id}] Connecté en WiFi à {ip}!")
+                self.master.after(0, lambda: messagebox.showinfo(
+                    "Succès", 
+                    f"Appareil connecté en WiFi ({ip}).\n\n"
+                    "Vous pouvez maintenant débrancher le câble USB."
+                ))
+                
+                # Update IP field
+                self.master.after(0, lambda: [
+                    self.wifi_ip_entry.delete(0, tk.END),
+                    self.wifi_ip_entry.insert(0, ip)
+                ])
+                
+                # Save IP if auto-connect
+                if self.config.get("auto_connect_wifi", True):
+                    saved_ips = self.config.get("saved_wifi_ips", [])
+                    if ip not in saved_ips:
+                        saved_ips.append(ip)
+                        self.config["saved_wifi_ips"] = saved_ips
+                        self.master.after(0, self.save_config)
+
+                self.master.after(1000, lambda: self.populate_devices(show_warning=False))
+            else:
+                self.logger.error(f"[{device_id}] Échec de la connexion à {ip}.")
+        
+        threading.Thread(target=switch_process, daemon=True).start()
 
     def select_all_devices(self):
         """Select all devices in the listbox."""
@@ -552,7 +826,9 @@ class Application(tk.Frame):
     def get_selected_devices(self):
         """Get list of selected device IDs."""
         selected_indices = self.device_listbox.curselection()
-        return [self.all_devices[i] for i in selected_indices]
+        # Safety check for indices
+        valid_indices = [i for i in selected_indices if i < len(self.all_devices)]
+        return [self.all_devices[i] for i in valid_indices]
 
 
     def open_settings(self):
@@ -579,6 +855,9 @@ class Application(tk.Frame):
 
         self.transfer_button.config(state=tk.DISABLED)
         self.settings_button.config(state=tk.DISABLED)
+        
+        # Show cancel button
+        self.cancel_button.pack(pady=5)
 
         # Start multi-device transfer
         transfer_thread = threading.Thread(target=self.run_multi_device_transfer, args=(source, target, devices))
@@ -599,6 +878,9 @@ class Application(tk.Frame):
         """Run transfer to multiple devices in parallel with per-device worker pools."""
         import time
 
+        # Pause device polling during transfer
+        self.is_transferring = True
+
         # Reset cancel flag
         with self.cancel_lock:
             self.cancel_requested = False
@@ -615,112 +897,153 @@ class Application(tk.Frame):
 
         # Prepare files once (chunking, batching)
         self.logger.info("Préparation des fichiers...")
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Setup transfer manager with temp directory
-            self.transfer_manager.temp_dir = Path(temp_dir)
-            self.transfer_manager.files_to_chunk = []
-            self.transfer_manager.files_to_batch = []
-            self.transfer_manager.manifests = []
-            
-            # Scan and process files once
-            self.transfer_manager.scan_files(source)
-            self.transfer_manager.process_files(Path(source))
-            
-            self.logger.info(f"Fichiers préparés: {len(self.transfer_manager.manifests)} fichiers fragmentés, {len(self.transfer_manager.files_to_batch)} fichiers groupés")
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Setup transfer manager with temp directory
+                self.transfer_manager.temp_dir = Path(temp_dir)
+                self.transfer_manager.files_to_chunk = []
+                self.transfer_manager.files_to_batch = []
+                self.transfer_manager.manifests = []
+                
+                # Scan and process files once
+                self.transfer_manager.scan_files(source)
+                self.transfer_manager.process_files(Path(source))
+                
+                self.logger.info(f"Fichiers préparés: {len(self.transfer_manager.manifests)} fichiers fragmentés, {len(self.transfer_manager.files_to_batch)} fichiers groupés")
 
-            # Check for cancellation before Phase 1
+                # Check for cancellation before Phase 1
+                with self.cancel_lock:
+                    if self.cancel_requested:
+                        self.logger.info("Opération annulée par l'utilisateur")
+                        self._cleanup_transfer_ui()
+                        return
+
+                # Phase 1: Transfer to all devices in parallel
+                self.logger.info("\nPHASE 1: Transfert parallèle vers tous les appareils...")
+
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=len(devices)) as executor:
+                    futures = {}
+                    for device_id in devices:
+                        future = executor.submit(self._transfer_to_single_device, device_id, temp_dir)
+                        futures[future] = device_id
+
+                    # Wait for all transfers to complete
+                    for future in concurrent.futures.as_completed(futures):
+                        device_id = futures[future]
+                        try:
+                            success = future.result()
+                            transfer_results[device_id] = {
+                                'transfer_success': success,
+                                'reassembly_success': False
+                            }
+                            if success:
+                                self.logger.success(f"[{device_id}] Transfert terminé avec succès.")
+                            else:
+                                self.logger.error(f"[{device_id}] Transfert échoué.")
+                        except Exception as e:
+                            self.logger.error(f"[{device_id}] Erreur lors du transfert: {e}")
+                            transfer_results[device_id] = {
+                                'transfer_success': False,
+                                'reassembly_success': False
+                            }
+
+            # Get list of devices that succeeded transfer
+            successful_devices = [d for d in devices if transfer_results[d]['transfer_success']]
+
+            if not successful_devices:
+                self.logger.error("Aucun appareil n'a réussi le transfert. Arrêt.")
+                self._cleanup_transfer_ui()
+                return
+
+            # Check for cancellation before Phase 2
             with self.cancel_lock:
                 if self.cancel_requested:
                     self.logger.info("Opération annulée par l'utilisateur")
-                    self.timer_running = False
-                    self.transfer_button.config(state=tk.NORMAL)
-                    self.settings_button.config(state=tk.NORMAL)
+                    self._cleanup_transfer_ui()
                     return
 
-            # Phase 1: Transfer to all devices in parallel
-            self.logger.info("\nPHASE 1: Transfert parallèle vers tous les appareils...")
+            # Phase 2: Reassemble on ALL devices in PARALLEL with synchronized modals
+            self.logger.info(f"\nPHASE 2: Réassemblage parallèle sur {len(successful_devices)} appareil(s)...")
 
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=len(devices)) as executor:
-                futures = {}
-                for device_id in devices:
-                    future = executor.submit(self._transfer_to_single_device, device_id, temp_dir)
-                    futures[future] = device_id
+            try:
+                success = self._parallel_reassembly_on_all_devices(source, target, successful_devices, transfer_results)
+            except Exception as e:
+                self.logger.error(f"Erreur lors du réassemblage parallèle: {e}")
 
-                # Wait for all transfers to complete
-                for future in concurrent.futures.as_completed(futures):
-                    device_id = futures[future]
-                    try:
-                        success = future.result()
-                        transfer_results[device_id] = {
-                            'transfer_success': success,
-                            'reassembly_success': False
-                        }
-                        if success:
-                            self.logger.success(f"[{device_id}] Transfert terminé avec succès.")
-                        else:
-                            self.logger.error(f"[{device_id}] Transfert échoué.")
-                    except Exception as e:
-                        self.logger.error(f"[{device_id}] Erreur lors du transfert: {e}")
-                        transfer_results[device_id] = {
-                            'transfer_success': False,
-                            'reassembly_success': False
-                        }
+            # Phase 3: Show summary
+            self.logger.info("\n===== RÉSUMÉ FINAL =====")
+            success_count = sum(1 for r in transfer_results.values() if r['transfer_success'] and r['reassembly_success'])
+            total_count = len(devices)
 
-        # Get list of devices that succeeded transfer
-        successful_devices = [d for d in devices if transfer_results[d]['transfer_success']]
+            self.logger.info(f"Total: {total_count} appareil(s)")
+            self.logger.success(f"Réussi: {success_count} appareil(s)")
+            self.logger.error(f"Échoué: {total_count - success_count} appareil(s)")
 
-        if not successful_devices:
-            self.logger.error("Aucun appareil n'a réussi le transfert. Arrêt.")
-            self.timer_running = False
-            self.transfer_button.config(state=tk.NORMAL)
-            self.settings_button.config(state=tk.NORMAL)
-            return
+            for device_id, result in transfer_results.items():
+                if result['transfer_success'] and result['reassembly_success']:
+                    self.logger.success(f"  ✓ {device_id}: Transfert et réassemblage OK")
+                elif result['transfer_success']:
+                    self.logger.error(f"  ✗ {device_id}: Transfert OK, réassemblage échoué")
+                else:
+                    self.logger.error(f"  ✗ {device_id}: Transfert échoué")
 
-        # Check for cancellation before Phase 2
-        with self.cancel_lock:
-            if self.cancel_requested:
-                self.logger.info("Opération annulée par l'utilisateur")
-                self.timer_running = False
-                self.transfer_button.config(state=tk.NORMAL)
-                self.settings_button.config(state=tk.NORMAL)
-                return
-
-        # Phase 2: Reassemble on ALL devices in PARALLEL with synchronized modals
-        self.logger.info(f"\nPHASE 2: Réassemblage parallèle sur {len(successful_devices)} appareil(s)...")
-
-        try:
-            success = self._parallel_reassembly_on_all_devices(source, target, successful_devices, transfer_results)
+            self.logger.info("=" * 50)
+            
         except Exception as e:
-            self.logger.error(f"Erreur lors du réassemblage parallèle: {e}")
-
-        # Phase 3: Show summary
-        self.logger.info("\n===== RÉSUMÉ FINAL =====")
-        success_count = sum(1 for r in transfer_results.values() if r['transfer_success'] and r['reassembly_success'])
-        total_count = len(devices)
-
-        self.logger.info(f"Total: {total_count} appareil(s)")
-        self.logger.success(f"Réussi: {success_count} appareil(s)")
-        self.logger.error(f"Échoué: {total_count - success_count} appareil(s)")
-
-        for device_id, result in transfer_results.items():
-            if result['transfer_success'] and result['reassembly_success']:
-                self.logger.success(f"  ✓ {device_id}: Transfert et réassemblage OK")
-            elif result['transfer_success']:
-                self.logger.error(f"  ✗ {device_id}: Transfert OK, réassemblage échoué")
-            else:
-                self.logger.error(f"  ✗ {device_id}: Transfert échoué")
-
-        self.logger.info("=" * 50)
-
+            self.logger.error(f"Erreur critique lors du transfert: {e}")
+        finally:
+            self._cleanup_transfer_ui()
+            
+    def _cleanup_transfer_ui(self):
+        """Reset UI state after transfer ends."""
         # Stop timer
         self.timer_running = False
-        elapsed = time.time() - self.transfer_start_time
-        self.logger.info(f"Durée totale: {int(elapsed//3600):02d}:{int((elapsed%3600)//60):02d}:{int(elapsed%60):02d}")
+        if self.transfer_start_time:
+            elapsed = time.time() - self.transfer_start_time
+            self.logger.info(f"Durée totale: {int(elapsed//3600):02d}:{int((elapsed%3600)//60):02d}:{int(elapsed%60):02d}")
+
+        # Resume device polling
+        self.is_transferring = False
+
+        # Hide cancel button
+        self.master.after(0, lambda: self.cancel_button.pack_forget())
 
         # Re-enable buttons
         self.transfer_button.config(state=tk.NORMAL)
         self.settings_button.config(state=tk.NORMAL)
+
+    def _cancel_current_operation(self):
+        """Cancel the current transfer/reassembly operation."""
+        confirm = messagebox.askyesno(
+            "Confirmation",
+            "Voulez-vous vraiment annuler l'opération en cours?\n\n"
+            "Les fichiers déjà transférés resteront sur l'appareil."
+        )
+        
+        if not confirm:
+            return
+        
+        self.logger.warning("⚠️ Annulation demandée par l'utilisateur...")
+        
+        with self.cancel_lock:
+            self.cancel_requested = True
+        
+        # Cancel transfer manager
+        if hasattr(self, 'transfer_manager') and self.transfer_manager:
+            self.transfer_manager.cancel()
+        
+        # Cancel any active reassembly managers
+        if hasattr(self, 'current_reassembly_managers'):
+            for device_id, mgr in self.current_reassembly_managers.items():
+                try:
+                    mgr.cancel()
+                    self.logger.info(f"[{device_id}] Réassemblage annulé")
+                except:
+                    pass
+        
+        # Force cleanup UI after a short delay to allow threads to stop
+        self.master.after(1000, self._cleanup_transfer_ui)
 
     def _transfer_to_single_device(self, device_id, temp_dir):
         """Transfer files to a single device with its own worker pool."""
@@ -996,7 +1319,10 @@ class Application(tk.Frame):
         step_complete = {}  # When step is complete for a thread
 
         # Determine steps based on config
-        use_termux = self.config.get("use_termux_for_reassembly", True)
+        # use_adb_shell_mode = True means NO Termux (direct ADB shell reassembly)
+        # This is the recommended mode and the default
+        use_adb_shell_mode = self.config.get("use_adb_shell_mode", True)
+        use_termux = not use_adb_shell_mode
         
         if use_termux:
             steps = [

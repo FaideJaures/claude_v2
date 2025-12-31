@@ -15,11 +15,11 @@ class ReassemblyManager:
     def reassemble_via_adb_shell(self, remote_temp_dir: str, target_dir: str):
         """Reassemble files via ADB shell (no Termux)."""
         self.logger.info("Démarrage du réassemblage via ADB shell...")
+        self.logger.info(f"[{self.device_id}] [DEBUG] Remote Temp: {remote_temp_dir}, Target: {target_dir}")
 
         if self.config.get("unlock_device"):
             self._unlock_device()
 
-        # 1. Push reassembly script
         # 1. Push reassembly script
         import sys
         if hasattr(sys, '_MEIPASS'):
@@ -38,7 +38,9 @@ class ReassemblyManager:
 
         # 3. Execute reassembly script in background
         self.logger.info("Exécution du script de réassemblage...")
-        reassemble_cmd = f"shell 'cd {remote_temp_dir} && nohup sh ./unified.sh {remote_temp_dir} > /dev/null 2>&1 &'"
+        cmd = f"cd {remote_temp_dir} && nohup sh ./unified.sh {remote_temp_dir} > /dev/null 2>&1 &"
+        self.logger.info(f"[{self.device_id}] Commande: {cmd}")
+        reassemble_cmd = f"shell '{cmd}'"
         self.adb.run_command(reassemble_cmd, self.device_id)
 
         # 4. Wait for completion using marker file
@@ -50,7 +52,6 @@ class ReassemblyManager:
         if not self._verify_reassembled_files(remote_temp_dir):
             self.logger.warning("Vérification des fichiers réassemblés a échoué")
         
-        # 6. Move files to destination if configured
         # 6. Move files to destination
         # In ADB shell mode, we always move to target directory if specified,
         # as there is no interactive step to ask the user.
@@ -58,6 +59,7 @@ class ReassemblyManager:
             final_destination_path = target_dir
             self.logger.info(f"Déplacement des fichiers vers {final_destination_path}...")
             if not self._move_to_final_destination(remote_temp_dir, final_destination_path):
+                self.logger.error("Échec du déplacement vers la destination finale")
                 return False
         else:
             self.logger.info("Pas de dossier cible défini ou identique au temporaire. Fichiers laissés sur place.")

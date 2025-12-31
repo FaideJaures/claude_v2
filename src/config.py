@@ -59,3 +59,11 @@ DEFAULT_TRUST_LOCAL_CHUNKS = False
 # Skip size verification during transfer checks
 # Safe to skip: if file was pushed without error, size is correct
 DEFAULT_SKIP_SIZE_VERIFICATION = False
+
+# === WIFI & AUTO-REFRESH SETTINGS ===
+
+# Device list refresh interval in milliseconds
+DEFAULT_REFRESH_INTERVAL = 3000
+
+# Automatically connect to known WiFi devices on startup
+DEFAULT_AUTO_CONNECT_WIFI = True
