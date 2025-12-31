@@ -43,3 +43,19 @@ DEFAULT_SJF_SCHEDULING = True
 # Optimal bundle size for small file ZIP bundles (in bytes)
 # Used by bin packing algorithm - 50 MB is a good balance
 DEFAULT_BUNDLE_SIZE = 50 * 1024 * 1024
+
+# === FAST MODE OPTIONS ===
+# These options skip redundant verifications for maximum speed
+
+# Skip verification AFTER pushing chunks (before reassembly)
+# The final verification after reassembly still happens
+# Safe to skip: we trust ADB push succeeded if no error was thrown
+DEFAULT_SKIP_EARLY_VERIFICATION = False
+
+# Skip verification of existing local chunks (reuse without checking)
+# Safe to skip: chunks on disk are unlikely to be corrupted
+DEFAULT_TRUST_LOCAL_CHUNKS = False
+
+# Skip size verification during transfer checks
+# Safe to skip: if file was pushed without error, size is correct
+DEFAULT_SKIP_SIZE_VERIFICATION = False

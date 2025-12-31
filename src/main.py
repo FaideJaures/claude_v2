@@ -24,6 +24,7 @@ from config import (
 from core.transfer import TransferManager
 from utils.adb import Adb
 from utils.apk_installer import ApkInstaller
+from utils.updater import check_and_update_on_startup, AutoUpdater
 from ui.modal_dialog import (
     TransferScriptModal,
     TermuxInstallModal,
@@ -75,159 +76,154 @@ class SettingsWindow(tk.Toplevel):
 
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Enable mouse wheel scrolling
+        def on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind_all("<MouseWheel>", on_mousewheel)
 
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
+        # ═══════════════════════════════════════════════════════════════
+        # SECTION 1: TRANSFERT
+        # ═══════════════════════════════════════════════════════════════
+        section1 = tk.Label(scrollable_frame, text="━━━ Transfert ━━━", font=("Arial", 11, "bold"), fg="#2196F3")
+        section1.pack(pady=(15, 10))
+
         # Parallel processes
         parallel_frame = tk.Frame(scrollable_frame)
-        parallel_frame.pack(pady=10, padx=10, fill=tk.X)
-        parallel_label = tk.Label(parallel_frame, text="Processus parallèles:")
-        parallel_label.pack(side=tk.LEFT)
+        parallel_frame.pack(pady=5, padx=20, fill=tk.X)
+        tk.Label(parallel_frame, text="Processus parallèles:").pack(side=tk.LEFT)
         self.parallel_processes = tk.IntVar(value=self.config.get("parallel_processes", DEFAULT_PARALLEL_PROCESSES))
-        parallel_entry = tk.Entry(parallel_frame, textvariable=self.parallel_processes)
-        parallel_entry.pack(side=tk.RIGHT)
+        tk.Entry(parallel_frame, textvariable=self.parallel_processes, width=10).pack(side=tk.RIGHT)
 
         # Chunk size
         chunk_frame = tk.Frame(scrollable_frame)
-        chunk_frame.pack(pady=10, padx=10, fill=tk.X)
-        chunk_label = tk.Label(chunk_frame, text="Taille des morceaux (Mo):")
-        chunk_label.pack(side=tk.LEFT)
+        chunk_frame.pack(pady=5, padx=20, fill=tk.X)
+        tk.Label(chunk_frame, text="Taille chunks (Mo):").pack(side=tk.LEFT)
         self.chunk_size_mb = tk.IntVar(value=self.config.get("chunk_size", DEFAULT_CHUNK_SIZE) // (1024 * 1024))
-        chunk_entry = tk.Entry(chunk_frame, textvariable=self.chunk_size_mb)
-        chunk_entry.pack(side=tk.RIGHT)
+        tk.Entry(chunk_frame, textvariable=self.chunk_size_mb, width=10).pack(side=tk.RIGHT)
 
         # Small file threshold
         small_file_frame = tk.Frame(scrollable_frame)
-        small_file_frame.pack(pady=10, padx=10, fill=tk.X)
-        small_file_label = tk.Label(small_file_frame, text="Seuil des petits fichiers (Mo):")
-        small_file_label.pack(side=tk.LEFT)
+        small_file_frame.pack(pady=5, padx=20, fill=tk.X)
+        tk.Label(small_file_frame, text="Seuil petits fichiers (Mo):").pack(side=tk.LEFT)
         self.small_file_threshold_mb = tk.IntVar(value=self.config.get("small_file_threshold", DEFAULT_SMALL_FILE_THRESHOLD) // (1024 * 1024))
-        small_file_entry = tk.Entry(small_file_frame, textvariable=self.small_file_threshold_mb)
-        small_file_entry.pack(side=tk.RIGHT)
-
-        # Remote temp dir
-        remote_dir_frame = tk.Frame(scrollable_frame)
-        remote_dir_frame.pack(pady=10, padx=10, fill=tk.X)
-        remote_dir_label = tk.Label(remote_dir_frame, text="Dossier temporaire distant:")
-        remote_dir_label.pack(side=tk.LEFT)
-        self.remote_temp_dir = tk.StringVar(value=self.config.get("remote_temp_dir", DEFAULT_REMOTE_TEMP_DIR))
-        remote_dir_entry = tk.Entry(remote_dir_frame, textvariable=self.remote_temp_dir)
-        remote_dir_entry.pack(side=tk.RIGHT)
-
-        # Unlock device
-        unlock_frame = tk.Frame(scrollable_frame)
-        unlock_frame.pack(pady=10, padx=10, fill=tk.X)
-        self.unlock_device = tk.BooleanVar(value=self.config.get("unlock_device", False))
-        unlock_check = tk.Checkbutton(unlock_frame, text="Déverrouiller l'appareil", variable=self.unlock_device)
-        unlock_check.pack(side=tk.LEFT)
-
-        # Unlock method
-        unlock_method_frame = tk.Frame(scrollable_frame)
-        unlock_method_frame.pack(pady=10, padx=10, fill=tk.X)
-        unlock_method_label = tk.Label(unlock_method_frame, text="Méthode de déverrouillage:")
-        unlock_method_label.pack(side=tk.LEFT)
-        self.unlock_method = tk.StringVar(value=self.config.get("unlock_method", "password"))
-        unlock_method_menu = tk.OptionMenu(unlock_method_frame, self.unlock_method, "password", "pin", "swipe")
-        unlock_method_menu.pack(side=tk.RIGHT)
-
-        # Unlock secret
-        unlock_secret_frame = tk.Frame(scrollable_frame)
-        unlock_secret_frame.pack(pady=10, padx=10, fill=tk.X)
-        unlock_secret_label = tk.Label(unlock_secret_frame, text="Code/Mot de passe:")
-        unlock_secret_label.pack(side=tk.LEFT)
-        self.unlock_secret = tk.StringVar(value=self.config.get("unlock_secret", "0000"))
-        unlock_secret_entry = tk.Entry(unlock_secret_frame, textvariable=self.unlock_secret, show="*")
-        unlock_secret_entry.pack(side=tk.RIGHT)
-
-        # Use Termux for reassembly
-        use_termux_frame = tk.Frame(scrollable_frame)
-        use_termux_frame.pack(pady=10, padx=10, fill=tk.X)
-        self.use_termux_for_reassembly = tk.BooleanVar(value=self.config.get("use_termux_for_reassembly", True))
-        use_termux_check = tk.Checkbutton(use_termux_frame, text="Utiliser Termux pour le réassemblage", variable=self.use_termux_for_reassembly)
-        use_termux_check.pack(side=tk.LEFT)
-
-        # Auto move after reassembly
-        auto_move_frame = tk.Frame(scrollable_frame)
-        auto_move_frame.pack(pady=10, padx=10, fill=tk.X)
-        self.auto_move_after_reassembly = tk.BooleanVar(value=self.config.get("auto_move_after_reassembly", False))
-        auto_move_check = tk.Checkbutton(auto_move_frame, text="Déplacer automatiquement après réassemblage", variable=self.auto_move_after_reassembly)
-        auto_move_check.pack(side=tk.LEFT)
-
-        # Delete temp folder
-        delete_temp_frame = tk.Frame(scrollable_frame)
-        delete_temp_frame.pack(pady=10, padx=10, fill=tk.X)
-        self.delete_temp_folder = tk.BooleanVar(value=self.config.get("delete_temp_folder", False))
-        delete_temp_check = tk.Checkbutton(delete_temp_frame, text="Supprimer le dossier temporaire automatiquement", variable=self.delete_temp_folder)
-        delete_temp_check.pack(side=tk.LEFT)
-
-        # Verify after reassembly
-        verify_after_frame = tk.Frame(scrollable_frame)
-        verify_after_frame.pack(pady=10, padx=10, fill=tk.X)
-        self.verify_after_reassembly = tk.BooleanVar(value=self.config.get("verify_after_reassembly", True))
-        verify_after_check = tk.Checkbutton(verify_after_frame, text="Vérifier les fichiers après réassemblage", variable=self.verify_after_reassembly)
-        verify_after_check.pack(side=tk.LEFT)
-
-        # Aggressive temp cleanup
-        aggressive_cleanup_frame = tk.Frame(scrollable_frame)
-        aggressive_cleanup_frame.pack(pady=10, padx=10, fill=tk.X)
-        self.aggressive_temp_cleanup = tk.BooleanVar(value=self.config.get("aggressive_temp_cleanup", True))
-        aggressive_cleanup_check = tk.Checkbutton(aggressive_cleanup_frame, text="Nettoyage agressif du dossier temporaire", variable=self.aggressive_temp_cleanup)
-        aggressive_cleanup_check.pack(side=tk.LEFT)
-
-        # Auto-detect permission
-        auto_detect_frame = tk.Frame(scrollable_frame)
-        auto_detect_frame.pack(pady=10, padx=10, fill=tk.X)
-        self.auto_detect_permission = tk.BooleanVar(value=self.config.get("auto_detect_permission", True))
-        auto_detect_check = tk.Checkbutton(auto_detect_frame, text="Détection automatique de la permission de stockage", variable=self.auto_detect_permission)
-        auto_detect_check.pack(side=tk.LEFT)
-
-        # Reassembly Timeout
-        timeout_frame = tk.Frame(scrollable_frame)
-        timeout_frame.pack(pady=10, padx=10, fill=tk.X)
-        timeout_label = tk.Label(timeout_frame, text="Timeout réassemblage (sec):")
-        timeout_label.pack(side=tk.LEFT)
-        self.reassembly_timeout = tk.IntVar(value=self.config.get("reassembly_timeout", 1800))
-        timeout_entry = tk.Entry(timeout_frame, textvariable=self.reassembly_timeout)
-        timeout_entry.pack(side=tk.RIGHT)
-
-        # === OPTIMIZATION SETTINGS SECTION ===
-        opt_separator = tk.Label(scrollable_frame, text="━━━ Optimisations de Transfert ━━━", font=("Arial", 10, "bold"))
-        opt_separator.pack(pady=(20, 10))
-
-        # ADB Shell Mode (Termux-free)
-        adb_shell_frame = tk.Frame(scrollable_frame)
-        adb_shell_frame.pack(pady=10, padx=10, fill=tk.X)
-        self.use_adb_shell_mode = tk.BooleanVar(value=self.config.get("use_adb_shell_mode", True))
-        adb_shell_check = tk.Checkbutton(adb_shell_frame, text="Mode ADB Shell (sans Termux)", variable=self.use_adb_shell_mode)
-        adb_shell_check.pack(side=tk.LEFT)
-
-        # Resume transfer
-        resume_frame = tk.Frame(scrollable_frame)
-        resume_frame.pack(pady=10, padx=10, fill=tk.X)
-        self.resume_transfer = tk.BooleanVar(value=self.config.get("resume_transfer", True))
-        resume_check = tk.Checkbutton(resume_frame, text="Reprendre transfert (ignorer fichiers existants)", variable=self.resume_transfer)
-        resume_check.pack(side=tk.LEFT)
-
-        # SJF Scheduling
-        sjf_frame = tk.Frame(scrollable_frame)
-        sjf_frame.pack(pady=10, padx=10, fill=tk.X)
-        self.sjf_scheduling = tk.BooleanVar(value=self.config.get("sjf_scheduling", True))
-        sjf_check = tk.Checkbutton(sjf_frame, text="SJF: Transférer petits fichiers en premier", variable=self.sjf_scheduling)
-        sjf_check.pack(side=tk.LEFT)
+        tk.Entry(small_file_frame, textvariable=self.small_file_threshold_mb, width=10).pack(side=tk.RIGHT)
 
         # Bundle size
         bundle_frame = tk.Frame(scrollable_frame)
-        bundle_frame.pack(pady=10, padx=10, fill=tk.X)
-        bundle_label = tk.Label(bundle_frame, text="Taille des bundles ZIP (Mo):")
-        bundle_label.pack(side=tk.LEFT)
+        bundle_frame.pack(pady=5, padx=20, fill=tk.X)
+        tk.Label(bundle_frame, text="Taille bundles ZIP (Mo):").pack(side=tk.LEFT)
         self.bundle_size_mb = tk.IntVar(value=self.config.get("bundle_size", 50 * 1024 * 1024) // (1024 * 1024))
-        bundle_entry = tk.Entry(bundle_frame, textvariable=self.bundle_size_mb)
-        bundle_entry.pack(side=tk.RIGHT)
+        tk.Entry(bundle_frame, textvariable=self.bundle_size_mb, width=10).pack(side=tk.RIGHT)
 
-        # Save button
-        save_button = tk.Button(scrollable_frame, text="Enregistrer", command=self.save_and_close)
-        save_button.pack(pady=20)
+        # Remote temp dir
+        remote_dir_frame = tk.Frame(scrollable_frame)
+        remote_dir_frame.pack(pady=5, padx=20, fill=tk.X)
+        tk.Label(remote_dir_frame, text="Dossier distant:").pack(side=tk.LEFT)
+        self.remote_temp_dir = tk.StringVar(value=self.config.get("remote_temp_dir", DEFAULT_REMOTE_TEMP_DIR))
+        tk.Entry(remote_dir_frame, textvariable=self.remote_temp_dir, width=25).pack(side=tk.RIGHT)
+
+        # ═══════════════════════════════════════════════════════════════
+        # SECTION 2: OPTIMISATIONS
+        # ═══════════════════════════════════════════════════════════════
+        section2 = tk.Label(scrollable_frame, text="━━━ Optimisations ━━━", font=("Arial", 11, "bold"), fg="#4CAF50")
+        section2.pack(pady=(20, 10))
+
+        # Resume transfer
+        self.resume_transfer = tk.BooleanVar(value=self.config.get("resume_transfer", True))
+        tk.Checkbutton(scrollable_frame, text="Reprendre transfert interrompu", variable=self.resume_transfer).pack(anchor="w", padx=20, pady=3)
+
+        # SJF Scheduling  
+        self.sjf_scheduling = tk.BooleanVar(value=self.config.get("sjf_scheduling", True))
+        tk.Checkbutton(scrollable_frame, text="Petits fichiers en premier (plus rapide)", variable=self.sjf_scheduling).pack(anchor="w", padx=20, pady=3)
+
+        # Verify after reassembly
+        self.verify_after_reassembly = tk.BooleanVar(value=self.config.get("verify_after_reassembly", True))
+        tk.Checkbutton(scrollable_frame, text="Vérifier après transfert", variable=self.verify_after_reassembly).pack(anchor="w", padx=20, pady=3)
+
+        # Auto move after reassembly
+        self.auto_move_after_reassembly = tk.BooleanVar(value=self.config.get("auto_move_after_reassembly", False))
+        tk.Checkbutton(scrollable_frame, text="Déplacer vers destination finale", variable=self.auto_move_after_reassembly).pack(anchor="w", padx=20, pady=3)
+
+        # Delete temp folder
+        self.delete_temp_folder = tk.BooleanVar(value=self.config.get("delete_temp_folder", False))
+        tk.Checkbutton(scrollable_frame, text="Supprimer dossier temporaire après", variable=self.delete_temp_folder).pack(anchor="w", padx=20, pady=3)
+
+        # Aggressive cleanup (hidden - kept for backward compat)
+        self.aggressive_temp_cleanup = tk.BooleanVar(value=self.config.get("aggressive_temp_cleanup", True))
+
+        # ═══════════════════════════════════════════════════════════════
+        # SECTION 3: MODE RAPIDE
+        # ═══════════════════════════════════════════════════════════════
+        section_fast = tk.Label(scrollable_frame, text="━━━ Mode Rapide ━━━", font=("Arial", 11, "bold"), fg="#9C27B0")
+        section_fast.pack(pady=(20, 10))
+        
+        # Hint label
+        fast_hint = tk.Label(scrollable_frame, text="(Ignorer les vérifications redondantes)", font=("Arial", 9, "italic"), fg="gray")
+        fast_hint.pack(anchor="w", padx=20)
+
+        # Skip early verification (before reassembly)
+        self.skip_early_verification = tk.BooleanVar(value=self.config.get("skip_early_verification", False))
+        tk.Checkbutton(scrollable_frame, text="Ignorer vérification après push", variable=self.skip_early_verification).pack(anchor="w", padx=20, pady=3)
+
+        # Trust local chunks (don't verify existing chunks)
+        self.trust_local_chunks = tk.BooleanVar(value=self.config.get("trust_local_chunks", False))
+        tk.Checkbutton(scrollable_frame, text="Faire confiance aux chunks locaux", variable=self.trust_local_chunks).pack(anchor="w", padx=20, pady=3)
+
+        # Skip size verification
+        self.skip_size_verification = tk.BooleanVar(value=self.config.get("skip_size_verification", False))
+        tk.Checkbutton(scrollable_frame, text="Ignorer vérification des tailles", variable=self.skip_size_verification).pack(anchor="w", padx=20, pady=3)
+
+        # ═══════════════════════════════════════════════════════════════
+        # SECTION 4: APPAREIL
+        # ═══════════════════════════════════════════════════════════════
+        section3 = tk.Label(scrollable_frame, text="━━━ Appareil ━━━", font=("Arial", 11, "bold"), fg="#FF9800")
+        section3.pack(pady=(20, 10))
+
+        # Use ADB Shell mode (replaces Termux option - clearer)
+        self.use_adb_shell_mode = tk.BooleanVar(value=self.config.get("use_adb_shell_mode", True))
+        tk.Checkbutton(scrollable_frame, text="Mode sans Termux (recommandé)", variable=self.use_adb_shell_mode).pack(anchor="w", padx=20, pady=3)
+        # Keep use_termux_for_reassembly for backward compat (inverted logic)
+        self.use_termux_for_reassembly = tk.BooleanVar(value=not self.config.get("use_adb_shell_mode", True))
+
+        # Unlock device
+        self.unlock_device = tk.BooleanVar(value=self.config.get("unlock_device", False))
+        tk.Checkbutton(scrollable_frame, text="Déverrouiller automatiquement", variable=self.unlock_device).pack(anchor="w", padx=20, pady=3)
+
+        # Unlock method
+        unlock_method_frame = tk.Frame(scrollable_frame)
+        unlock_method_frame.pack(pady=5, padx=20, fill=tk.X)
+        tk.Label(unlock_method_frame, text="Méthode:").pack(side=tk.LEFT)
+        self.unlock_method = tk.StringVar(value=self.config.get("unlock_method", "password"))
+        tk.OptionMenu(unlock_method_frame, self.unlock_method, "password", "pin", "swipe").pack(side=tk.RIGHT)
+
+        # Unlock secret
+        unlock_secret_frame = tk.Frame(scrollable_frame)
+        unlock_secret_frame.pack(pady=5, padx=20, fill=tk.X)
+        tk.Label(unlock_secret_frame, text="Code/Mot de passe:").pack(side=tk.LEFT)
+        self.unlock_secret = tk.StringVar(value=self.config.get("unlock_secret", "0000"))
+        tk.Entry(unlock_secret_frame, textvariable=self.unlock_secret, show="*", width=15).pack(side=tk.RIGHT)
+
+        # Auto-detect permission
+        self.auto_detect_permission = tk.BooleanVar(value=self.config.get("auto_detect_permission", True))
+        tk.Checkbutton(scrollable_frame, text="Détecter permissions automatiquement", variable=self.auto_detect_permission).pack(anchor="w", padx=20, pady=3)
+
+        # Reassembly Timeout
+        timeout_frame = tk.Frame(scrollable_frame)
+        timeout_frame.pack(pady=5, padx=20, fill=tk.X)
+        tk.Label(timeout_frame, text="Timeout (sec):").pack(side=tk.LEFT)
+        self.reassembly_timeout = tk.IntVar(value=self.config.get("reassembly_timeout", 1800))
+        tk.Entry(timeout_frame, textvariable=self.reassembly_timeout, width=10).pack(side=tk.RIGHT)
+
+        # ═══════════════════════════════════════════════════════════════
+        # SAVE BUTTON
+        # ═══════════════════════════════════════════════════════════════
+        save_button = tk.Button(scrollable_frame, text="💾 Enregistrer", command=self.save_and_close, 
+                               bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), padx=20, pady=5)
+        save_button.pack(pady=25)
 
     def save_and_close(self):
         self.config["parallel_processes"] = self.parallel_processes.get()
@@ -250,6 +246,10 @@ class SettingsWindow(tk.Toplevel):
         self.config["resume_transfer"] = self.resume_transfer.get()
         self.config["sjf_scheduling"] = self.sjf_scheduling.get()
         self.config["bundle_size"] = self.bundle_size_mb.get() * 1024 * 1024
+        # Fast mode options
+        self.config["skip_early_verification"] = self.skip_early_verification.get()
+        self.config["trust_local_chunks"] = self.trust_local_chunks.get()
+        self.config["skip_size_verification"] = self.skip_size_verification.get()
         self.master.save_config()
         self.destroy()
 
@@ -257,13 +257,21 @@ class Application(tk.Frame):
     def __init__(self, master=None):
         super().__init__(master)
         self.master = master
-        self.master.title("Outil de Transfert de Fichiers ADB")
         self.master.geometry("800x600")
         self.pack(fill=tk.BOTH, expand=True)
         
         self.config = self.load_config()
         self.create_widgets()
         self.logger = SimpleLogger(self.log)
+        
+        # Check version and show in title
+        self.updater = AutoUpdater(self.logger)
+        version = self.updater.get_current_version()
+        self.master.title(f"Outil de Transfert ADB - v{version}")
+        
+        # Check for updates on startup (in background)
+        if self.config.get("auto_update", True):
+            threading.Thread(target=self._check_updates_background, daemon=True).start()
 
         self.adb = Adb(self.logger)
         self.transfer_manager = TransferManager(self.config, self.logger)
@@ -282,6 +290,40 @@ class Application(tk.Frame):
         self.check_and_install_termux_on_devices()
         self.source_dir.set(self.config.get("source_dir", ""))
         self.target_dir.set(self.config.get("target_dir", ""))
+    
+    def _check_updates_background(self):
+        """Check for updates in background thread."""
+        try:
+            has_updates, message = self.updater.check_for_updates()
+            if has_updates:
+                # Ask user if they want to update
+                self.master.after(0, self._prompt_update)
+        except Exception as e:
+            self.logger.warning(f"Erreur lors de la vérification des mises à jour: {e}")
+    
+    def _prompt_update(self):
+        """Show update prompt to user."""
+        result = messagebox.askyesno(
+            "Mise à jour disponible",
+            "Une nouvelle version est disponible.\nVoulez-vous mettre à jour maintenant?"
+        )
+        if result:
+            self.logger.info("Téléchargement de la mise à jour...")
+            success, msg, needs_restart = self.updater.pull_updates()
+            if needs_restart:
+                messagebox.showinfo(
+                    "Mise à jour terminée",
+                    "L'application va redémarrer pour appliquer la mise à jour."
+                )
+                self._restart_application()
+            else:
+                self.logger.info(msg)
+    
+    def _restart_application(self):
+        """Restart the application."""
+        import sys
+        python = sys.executable
+        os.execl(python, python, *sys.argv)
 
     def load_config(self):
         config_path = "config.json"

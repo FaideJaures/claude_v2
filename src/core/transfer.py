@@ -367,10 +367,16 @@ class TransferManager:
         self.logger.success(f"[{device_id}] Transfert terminé: {len(files_to_transfer)} fichiers")
 
         # Post-transfer verification (BEFORE cleanup so we can retry if needed)
-        if self.config.get("verify_transfer", True):
+        # Skip if skip_early_verification is enabled (user trusts ADB push)
+        skip_early = self.config.get("skip_early_verification", False)
+        verify_transfer = self.config.get("verify_transfer", True) and not skip_early
+        
+        if verify_transfer:
             if not self._verify_transfer_on_device(remote_temp_dir, device_id):
                 self.logger.error(f"[{device_id}] Vérification échouée")
                 return False
+        elif skip_early:
+            self.logger.info(f"[{device_id}] Vérification précoce ignorée (mode rapide)")
 
         # Aggressive cleanup: delete local chunk files AFTER successful verification
         # Note: For persistent chunks, we keep them for reuse across transfers

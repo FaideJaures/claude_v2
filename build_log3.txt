@@ -1,0 +1,81 @@
+C:\Users\hp\AppData\Roaming\Python\Python313\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+1317 INFO: PyInstaller: 6.13.0, contrib hooks: 2025.9
+1318 INFO: Python: 3.13.1
+1368 INFO: Platform: Windows-11-10.0.26100-SP0
+1368 INFO: Python environment: C:\Python313
+1372 INFO: wrote C:\Users\hp\Desktop\claude_v2\src\ADB_Transfer_Tool.spec
+1407 INFO: Module search paths (PYTHONPATH):
+['C:\\Users\\hp\\AppData\\Roaming\\Python\\Python313\\Scripts\\pyinstaller.exe',
+ 'C:\\Python313\\python313.zip',
+ 'C:\\Python313\\DLLs',
+ 'C:\\Python313\\Lib',
+ 'C:\\Python313',
+ 'C:\\Users\\hp\\AppData\\Roaming\\Python\\Python313\\site-packages',
+ 'C:\\Python313\\Lib\\site-packages',
+ 'C:\\Users\\hp\\AppData\\Roaming\\Python\\Python313\\site-packages\\setuptools\\_vendor',
+ 'C:\\Users\\hp\\Desktop\\claude_v2\\src']
+C:\Users\hp\AppData\Roaming\Python\Python313\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+4680 INFO: checking Analysis
+4680 INFO: Building Analysis because Analysis-00.toc is non existent
+4680 INFO: Running Analysis Analysis-00.toc
+4680 INFO: Target bytecode optimization level: 0
+4680 INFO: Initializing module dependency graph...
+4682 INFO: Initializing module graph hook caches...
+4817 INFO: Analyzing modules for base_library.zip ...
+C:\Users\hp\AppData\Roaming\Python\Python313\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+C:\Users\hp\AppData\Roaming\Python\Python313\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+C:\Users\hp\AppData\Roaming\Python\Python313\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+8083 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\hp\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
+8473 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\hp\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
+C:\Users\hp\AppData\Roaming\Python\Python313\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+14825 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\hp\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
+21016 INFO: Caching module dependency graph...
+21103 INFO: Looking for Python shared library...
+21182 INFO: Using Python shared library: C:\Python313\python313.dll
+21183 INFO: Analyzing C:\Users\hp\Desktop\claude_v2\src\main.py
+21276 INFO: Processing pre-find-module-path hook 'hook-tkinter.py' from 'C:\\Users\\hp\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+21279 INFO: TclTkInfo: initializing cached Tcl/Tk info...
+22078 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\hp\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
+22556 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Users\\hp\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
+23340 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\Users\\hp\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
+25122 INFO: Processing module hooks (post-graph stage)...
+26105 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\hp\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
+26124 INFO: Performing binary vs. data reclassification (927 entries)
+40341 INFO: Looking for ctypes DLLs
+40418 INFO: Analyzing run-time hooks ...
+40420 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\hp\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks'
+40473 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'C:\\Users\\hp\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks'
+40502 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'C:\\Users\\hp\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks'
+40526 INFO: Including run-time hook 'pyi_rth__tkinter.py' from 'C:\\Users\\hp\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks'
+40578 INFO: Creating base_library.zip...
+40651 INFO: Looking for dynamic libraries
+41081 INFO: Extra DLL search directories (AddDllDirectory): []
+41081 INFO: Extra DLL search directories (PATH): []
+42197 INFO: Warnings written to C:\Users\hp\Desktop\claude_v2\src\build\ADB_Transfer_Tool\warn-ADB_Transfer_Tool.txt
+42231 INFO: Graph cross-reference written to C:\Users\hp\Desktop\claude_v2\src\build\ADB_Transfer_Tool\xref-ADB_Transfer_Tool.html
+42362 INFO: checking PYZ
+42362 INFO: Building PYZ because PYZ-00.toc is non existent
+42362 INFO: Building PYZ (ZlibArchive) C:\Users\hp\Desktop\claude_v2\src\build\ADB_Transfer_Tool\PYZ-00.pyz
+42929 INFO: Building PYZ (ZlibArchive) C:\Users\hp\Desktop\claude_v2\src\build\ADB_Transfer_Tool\PYZ-00.pyz completed successfully.
+43007 INFO: checking PKG
+43008 INFO: Building PKG because PKG-00.toc is non existent
+43008 INFO: Building PKG (CArchive) ADB_Transfer_Tool.pkg
+47806 INFO: Building PKG (CArchive) ADB_Transfer_Tool.pkg completed successfully.
+47822 INFO: Bootloader C:\Users\hp\AppData\Roaming\Python\Python313\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+47822 INFO: checking EXE
+47823 INFO: Building EXE because EXE-00.toc is non existent
+47823 INFO: Building EXE from EXE-00.toc
+47824 INFO: Copying bootloader EXE to C:\Users\hp\Desktop\claude_v2\src\dist\ADB_Transfer_Tool.exe
+48007 INFO: Copying icon to EXE
+48070 INFO: Copying 0 resources to EXE
+48071 INFO: Embedding manifest in EXE
+50027 INFO: Appending PKG archive to EXE
+50150 INFO: Fixing EXE headers
+53777 INFO: Building EXE from EXE-00.toc completed successfully.
+53790 INFO: Build complete! The results are available in: C:\Users\hp\Desktop\claude_v2\src\dist
