@@ -4,6 +4,7 @@ import tempfile
 import shutil
 import concurrent.futures
 import zipfile
+import json
 from pathlib import Path
 import shlex
 import time
@@ -13,6 +14,24 @@ from utils.adb import Adb
 
 from utils.termux import TermuxInstaller
 from core.reassembly import ReassemblyManager
+
+
+def _escape_shell_path(path: str) -> str:
+    """Escape a path for use in shell single-quoted strings.
+    
+    When using single quotes in shell, the only way to include a literal
+    single quote is to end the quote, add an escaped single quote, and
+    start a new quote: ' -> '\\''
+    
+    Example: "Nah, I'd win." -> "Nah, I'\\''d win."
+    
+    Args:
+        path: The path string to escape
+        
+    Returns:
+        The escaped path safe for use in shell single-quoted strings
+    """
+    return path.replace("'", "'\\''") if path else path
 
 class TransferManager:
     def __init__(self, config, logger):
@@ -79,7 +98,7 @@ class TransferManager:
             
             if not success:
                 self.logger.error("Le réassemblage a échoué.")
-                return
+                return False
             
             self.logger.info(f"Temps de réassemblage des fichiers: {reassembly_time:.2f} secondes.")
 
@@ -87,6 +106,7 @@ class TransferManager:
 
         total_time = time.time() - total_start_time
         self.logger.success(f"Transfert terminé avec succès en {total_time:.2f} secondes !")
+        return True
 
     def prepare_transfer(self, source_dir, output_dir):
         """
@@ -109,7 +129,7 @@ class TransferManager:
             # 2. Process files (chunking and batching) to output_dir
             chunking_start_time = time.time()
             self.logger.info("Traitement des fichiers...")
-            self.process_files(Path(source_dir), output_folder=output_path)
+            self.process_files(Path(source_dir), output_folder=output_path, use_persistent_chunks=False)
             chunking_time = time.time() - chunking_start_time
             self.logger.info(f"Temps de traitement: {chunking_time:.2f} secondes.")
             
@@ -361,7 +381,7 @@ class TransferManager:
         resume_enabled = self.config.get("resume_transfer", True)
         
         # Create remote temp dir
-        self.adb.run_command(f'shell "mkdir -p {remote_temp_dir}"', device_id)
+        self.adb.run_command(f'shell "mkdir -p \'{_escape_shell_path(remote_temp_dir)}\'"', device_id)
 
         # Collect all files to transfer (chunks + metadata + batch files)
         files_to_transfer = []
@@ -379,7 +399,7 @@ class TransferManager:
             remote_chunk_dir = f"{remote_temp_dir}/{manifest['chunk_folder']}".replace('\\', '/')
 
             # Create remote chunk directory
-            self.adb.run_command(f'shell "mkdir -p {remote_chunk_dir}"', device_id)
+            self.adb.run_command(f'shell "mkdir -p \'{_escape_shell_path(remote_chunk_dir)}\'"', device_id)
 
             # Get all chunk files and metadata
             chunk_files = sorted(chunk_folder_path.glob("chunk_*.bin"))
@@ -539,7 +559,7 @@ class TransferManager:
         """
         try:
             result = self.adb.run_command(
-                f'shell "stat -c%s {remote_path} 2>/dev/null"',
+                f'shell "stat -c%s \'{_escape_shell_path(remote_path)}\' 2>/dev/null"',
                 device_id
             )
             if result:
@@ -586,8 +606,8 @@ class TransferManager:
             device_id: Device identifier
             _depth: Internal recursion depth counter (max 1 re-verification after retry)
         """
-        # Prevent infinite recursion - allow max 1 re-verification after retry
-        if _depth > 1:
+        # Prevent infinite recursion - allow max 100 re-verification after retry
+        if _depth > 100:
             self.logger.error(f"[{device_id}] Max verification depth reached, abandoning retry")
             return False
 
@@ -610,7 +630,7 @@ class TransferManager:
             # 1.1 Check metadata file exists
             metadata_path = f"{remote_chunk_dir}/chunk_metadata.json"
             result = self.adb.run_command(
-                f'shell "[ -f {metadata_path} ] && echo exists"',
+                f'shell "[ -f \'{_escape_shell_path(metadata_path)}\' ] && echo exists"',
                 device_id
             )
             if not result or 'exists' not in ''.join(result):
@@ -624,7 +644,7 @@ class TransferManager:
             
             # 1.2 Get list of chunks on device
             result = self.adb.run_command(
-                f'shell "ls {remote_chunk_dir}/chunk_*.bin 2>/dev/null"',
+                f'shell "ls \'{_escape_shell_path(remote_chunk_dir)}\'/chunk_*.bin 2>/dev/null"',
                 device_id
             )
             
@@ -657,7 +677,7 @@ class TransferManager:
                 for chunk_info in manifest['chunks']:
                     chunk_file = f"{remote_chunk_dir}/{chunk_info['filename']}"
                     result = self.adb.run_command(
-                        f'shell "stat -c%s {chunk_file} 2>/dev/null"',
+                        f'shell "stat -c%s \'{_escape_shell_path(chunk_file)}\' 2>/dev/null"',
                         device_id
                     )
                     if result:
@@ -687,7 +707,7 @@ class TransferManager:
             
             # Verify bundle ZIP exists and has correct size
             result = self.adb.run_command(
-                f'shell "stat -c%s {remote_bundle_path} 2>/dev/null"',
+                f'shell "stat -c%s \'{_escape_shell_path(remote_bundle_path)}\' 2>/dev/null"',
                 device_id
             )
             

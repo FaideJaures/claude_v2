@@ -3,6 +3,19 @@ import time
 from pathlib import Path
 from utils.adb import Adb
 
+
+def _escape_shell_path(path: str) -> str:
+    """Escape a path for use in shell single-quoted strings.
+    
+    When using single quotes in shell, the only way to include a literal
+    single quote is to end the quote, add an escaped single quote, and
+    start a new quote: ' -> '\\''
+    
+    Example: "Nah, I'd win." -> "Nah, I'\\''d win."
+    """
+    return path.replace("'", "'\\''") if path else path
+
+
 class ReassemblyManager:
     def __init__(self, config, logger, adb: Adb, device_id: str, modal_callback=None):
         self.config = config
@@ -389,7 +402,7 @@ class ReassemblyManager:
             True if successful, False otherwise
         """
         # Create target directory
-        self.adb.run_command(f'shell "mkdir -p \'{target_dir}\'"', self.device_id)
+        self.adb.run_command(f'shell "mkdir -p \'{_escape_shell_path(target_dir)}\'"', self.device_id)
 
         # Move all contents from temp dir to target dir, preserving structure
         # Using find to get all files and directories, then move them
@@ -402,19 +415,19 @@ class ReassemblyManager:
         output = self.adb.run_command(f'shell "[ -d {batch_dir} ] && echo exists"', self.device_id)
         if output and 'exists' in ''.join(output):
             # Move contents of batch directory to target, preserving structure
-            self.adb.run_command(f'shell "cp -r {batch_dir}/* \'{target_dir}/\' 2>/dev/null || true"', self.device_id)
+            self.adb.run_command(f'shell "cp -r {batch_dir}/* \'{_escape_shell_path(target_dir)}/\' 2>/dev/null || true"', self.device_id)
             self.logger.info("Fichiers groupés déplacés.")
 
         # Move reassembled files (files in temp root, not in _chunks folders, not unified.sh)
         # Find all files that don't belong to chunk folders
         self.adb.run_command(
-            f'shell "find {remote_temp_dir} -maxdepth 1 -type f ! -name \'unified.sh\' ! -name \'*.json\' -exec mv {{}} \'{target_dir}/\' \\; 2>/dev/null || true"',
+            f'shell "find {remote_temp_dir} -maxdepth 1 -type f ! -name \'unified.sh\' ! -name \'*.json\' -exec mv {{}} \'{_escape_shell_path(target_dir)}/\' \\; 2>/dev/null || true"',
             self.device_id
         )
 
         # Move any subdirectories (except batch and _chunks folders) to preserve structure
         self.adb.run_command(
-            f'shell "find {remote_temp_dir} -mindepth 1 -maxdepth 1 -type d ! -name batch ! -name \'*_chunks\' -exec cp -r {{}} \'{target_dir}/\' \\; 2>/dev/null || true"',
+            f'shell "find {remote_temp_dir} -mindepth 1 -maxdepth 1 -type d ! -name batch ! -name \'*_chunks\' -exec cp -r {{}} \'{_escape_shell_path(target_dir)}/\' \\; 2>/dev/null || true"',
             self.device_id
         )
 

@@ -53,14 +53,25 @@ FAILED_BUNDLES=0
 
 log_info "PHASE 1: Scanning for chunked files..."
 
-# Find all chunk folders recursively
-CHUNK_FOLDERS=$(find "$TRANSFER_ROOT" -type d -name "*_chunks" 2>/dev/null | sort)
+# Find all chunk folders recursively and process them
+# Use null delimiter to handle paths with spaces and special characters
+CHUNK_FOUND=0
 
-if [ -z "$CHUNK_FOLDERS" ]; then
+# Using a temp file approach to properly count in subshell
+TEMP_FILE=$(mktemp 2>/dev/null || echo "/data/local/tmp/unified_$$")
+
+find "$TRANSFER_ROOT" -type d -name "*_chunks" 2>/dev/null | sort > "$TEMP_FILE"
+
+if [ ! -s "$TEMP_FILE" ]; then
     log_info "No chunked files found"
 else
-    # Process each chunk folder
-    for CHUNK_DIR in $CHUNK_FOLDERS; do
+    while IFS= read -r CHUNK_DIR; do
+        # Skip empty lines
+        if [ -z "$CHUNK_DIR" ]; then
+            continue
+        fi
+        
+        CHUNK_FOUND=1
         TOTAL_CHUNKS=$((TOTAL_CHUNKS + 1))
 
         # Get chunk folder name and parent directory
@@ -96,8 +107,8 @@ else
         log_info "  Chunk folder: $CHUNK_DIR"
         log_info "  Output: $OUTPUT_FILE"
 
-        # Count chunks
-        NUM_CHUNKS=$(ls -1 "$CHUNK_DIR"/chunk_*.bin 2>/dev/null | wc -l)
+        # Count chunks - use find to avoid issues with special characters in paths
+        NUM_CHUNKS=$(find "$CHUNK_DIR" -maxdepth 1 -name "chunk_*.bin" -type f 2>/dev/null | wc -l)
 
         if [ "$NUM_CHUNKS" -eq 0 ]; then
             log_error "  No chunk files found"
@@ -115,7 +126,7 @@ else
         FAILED_CHUNK=0
 
         while [ $CHUNK_INDEX -lt $NUM_CHUNKS ]; do
-            CHUNK_FILE=$(printf "$CHUNK_DIR/chunk_%04d.bin" $CHUNK_INDEX)
+            CHUNK_FILE=$(printf "%s/chunk_%04d.bin" "$CHUNK_DIR" $CHUNK_INDEX)
 
             if [ ! -f "$CHUNK_FILE" ]; then
                 log_error "  Missing chunk: chunk_$(printf '%04d' $CHUNK_INDEX).bin"
@@ -173,7 +184,7 @@ else
             log_error "  Output file not created"
             FAILED_CHUNKS=$((FAILED_CHUNKS + 1))
         fi
-    done
+    done < "$TEMP_FILE"
 
     # Cleanup chunking manifest file if all succeeded
     if [ "$SUCCESS_CHUNKS" -eq "$TOTAL_CHUNKS" ] && [ "$TOTAL_CHUNKS" -gt 0 ]; then
@@ -185,6 +196,8 @@ else
     fi
 fi
 
+rm -f "$TEMP_FILE" 2>/dev/null
+
 echo ""
 
 # ============================================================
@@ -193,82 +206,88 @@ echo ""
 
 log_info "PHASE 2: Scanning for bundled archives..."
 
-# Find all bundle ZIP files
-BUNDLE_ZIPS=$(find "$TRANSFER_ROOT" -type f -name "bundle_*.zip" 2>/dev/null | sort)
+# Check if unzip is available first
+UNZIP_CMD=""
+if command -v unzip >/dev/null 2>&1; then
+    UNZIP_CMD="unzip"
+elif [ -f /system/xbin/unzip ]; then
+    UNZIP_CMD="/system/xbin/unzip"
+elif [ -f /data/local/tmp/busybox ]; then
+    UNZIP_CMD="/data/local/tmp/busybox unzip"
+fi
 
-if [ -z "$BUNDLE_ZIPS" ]; then
+# Find all bundle ZIP files using temp file approach
+BUNDLE_TEMP_FILE=$(mktemp 2>/dev/null || echo "/data/local/tmp/unified_bundle_$$")
+find "$TRANSFER_ROOT" -type f -name "bundle_*.zip" 2>/dev/null | sort > "$BUNDLE_TEMP_FILE"
+
+if [ ! -s "$BUNDLE_TEMP_FILE" ]; then
     log_info "No bundled archives found"
-else
-    # Check if unzip is available
-    UNZIP_CMD=""
-    if command -v unzip >/dev/null 2>&1; then
-        UNZIP_CMD="unzip"
-    elif [ -f /system/xbin/unzip ]; then
-        UNZIP_CMD="/system/xbin/unzip"
-    elif [ -f /data/local/tmp/busybox ]; then
-        UNZIP_CMD="/data/local/tmp/busybox unzip"
-    else
-        log_warning "unzip not found - bundled archives cannot be extracted"
-        log_warning "Please install busybox or unzip on device"
-        UNZIP_CMD=""
-    fi
-
-    if [ -n "$UNZIP_CMD" ]; then
-        # Process each bundle ZIP
-        for BUNDLE_ZIP in $BUNDLE_ZIPS; do
-            TOTAL_BUNDLES=$((TOTAL_BUNDLES + 1))
-
-            BUNDLE_BASENAME=$(basename "$BUNDLE_ZIP")
-            BUNDLE_PARENT=$(dirname "$BUNDLE_ZIP")
-
-            log_info "Processing bundle: $BUNDLE_BASENAME"
-            log_info "  Bundle location: $BUNDLE_ZIP"
-            log_info "  Extract to: $BUNDLE_PARENT"
-
-            # Get bundle size
-            BUNDLE_SIZE=$(stat -c%s "$BUNDLE_ZIP" 2>/dev/null || stat -f%z "$BUNDLE_ZIP" 2>/dev/null || echo "0")
-            BUNDLE_SIZE_MB=$(awk "BEGIN {printf \"%.2f\", $BUNDLE_SIZE / (1024*1024)}")
-            log_info "  Bundle size: ${BUNDLE_SIZE_MB} MB"
-
-            # Extract bundle to parent directory (preserving folder structure)
-            $UNZIP_CMD -o -q "$BUNDLE_ZIP" -d "$BUNDLE_PARENT" 2>/dev/null
-            EXTRACT_RESULT=$?
-
-            if [ $EXTRACT_RESULT -eq 0 ]; then
-                log_success "  Bundle extracted successfully"
-
-                # Delete ZIP after successful extraction
-                log_info "  Cleaning up bundle ZIP..."
-                rm -f "$BUNDLE_ZIP" 2>/dev/null
-                if [ $? -eq 0 ]; then
-                    log_info "  Bundle ZIP deleted"
-                else
-                    log_warning "  Could not delete bundle ZIP"
-                fi
-
-                SUCCESS_BUNDLES=$((SUCCESS_BUNDLES + 1))
-            else
-                log_error "  Bundle extraction failed (exit code: $EXTRACT_RESULT)"
-                FAILED_BUNDLES=$((FAILED_BUNDLES + 1))
-            fi
-        done
-
-        # Cleanup bundling manifest file if all succeeded
-        if [ "$SUCCESS_BUNDLES" -eq "$TOTAL_BUNDLES" ] && [ "$TOTAL_BUNDLES" -gt 0 ]; then
-            MANIFEST_FILE="$TRANSFER_ROOT/bundling_manifest.json"
-            if [ -f "$MANIFEST_FILE" ]; then
-                rm -f "$MANIFEST_FILE" 2>/dev/null
-                log_info "Removed bundling manifest file"
-            fi
-        fi
-    else
-        # No unzip available - mark all as failed
-        for BUNDLE_ZIP in $BUNDLE_ZIPS; do
+elif [ -z "$UNZIP_CMD" ]; then
+    log_warning "unzip not found - bundled archives cannot be extracted"
+    log_warning "Please install busybox or unzip on device"
+    # Count failed bundles
+    while IFS= read -r BUNDLE_ZIP; do
+        if [ -n "$BUNDLE_ZIP" ]; then
             TOTAL_BUNDLES=$((TOTAL_BUNDLES + 1))
             FAILED_BUNDLES=$((FAILED_BUNDLES + 1))
-        done
+        fi
+    done < "$BUNDLE_TEMP_FILE"
+else
+    # Process each bundle ZIP
+    while IFS= read -r BUNDLE_ZIP; do
+        # Skip empty lines
+        if [ -z "$BUNDLE_ZIP" ]; then
+            continue
+        fi
+        
+        TOTAL_BUNDLES=$((TOTAL_BUNDLES + 1))
+
+        BUNDLE_BASENAME=$(basename "$BUNDLE_ZIP")
+        BUNDLE_PARENT=$(dirname "$BUNDLE_ZIP")
+
+        log_info "Processing bundle: $BUNDLE_BASENAME"
+        log_info "  Bundle location: $BUNDLE_ZIP"
+        log_info "  Extract to: $BUNDLE_PARENT"
+
+        # Get bundle size
+        BUNDLE_SIZE=$(stat -c%s "$BUNDLE_ZIP" 2>/dev/null || stat -f%z "$BUNDLE_ZIP" 2>/dev/null || echo "0")
+        BUNDLE_SIZE_MB=$(awk "BEGIN {printf \"%.2f\", $BUNDLE_SIZE / (1024*1024)}")
+        log_info "  Bundle size: ${BUNDLE_SIZE_MB} MB"
+
+        # Extract bundle to parent directory (preserving folder structure)
+        $UNZIP_CMD -o -q "$BUNDLE_ZIP" -d "$BUNDLE_PARENT" 2>/dev/null
+        EXTRACT_RESULT=$?
+
+        if [ $EXTRACT_RESULT -eq 0 ]; then
+            log_success "  Bundle extracted successfully"
+
+            # Delete ZIP after successful extraction
+            log_info "  Cleaning up bundle ZIP..."
+            rm -f "$BUNDLE_ZIP" 2>/dev/null
+            if [ $? -eq 0 ]; then
+                log_info "  Bundle ZIP deleted"
+            else
+                log_warning "  Could not delete bundle ZIP"
+            fi
+
+            SUCCESS_BUNDLES=$((SUCCESS_BUNDLES + 1))
+        else
+            log_error "  Bundle extraction failed (exit code: $EXTRACT_RESULT)"
+            FAILED_BUNDLES=$((FAILED_BUNDLES + 1))
+        fi
+    done < "$BUNDLE_TEMP_FILE"
+
+    # Cleanup bundling manifest file if all succeeded
+    if [ "$SUCCESS_BUNDLES" -eq "$TOTAL_BUNDLES" ] && [ "$TOTAL_BUNDLES" -gt 0 ]; then
+        MANIFEST_FILE="$TRANSFER_ROOT/bundling_manifest.json"
+        if [ -f "$MANIFEST_FILE" ]; then
+            rm -f "$MANIFEST_FILE" 2>/dev/null
+            log_info "Removed bundling manifest file"
+        fi
     fi
 fi
+
+rm -f "$BUNDLE_TEMP_FILE" 2>/dev/null
 
 echo ""
 

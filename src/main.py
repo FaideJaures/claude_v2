@@ -43,8 +43,9 @@ from ui.modal_dialog import (
 )
 
 class SimpleLogger:
-    def __init__(self, log_func):
+    def __init__(self, log_func, verbose=False):
         self.log_func = log_func
+        self.verbose = verbose  # Controls ADB command logging verbosity
 
     def _timestamp(self) -> str:
         """Get current timestamp."""
@@ -948,19 +949,32 @@ class Application(tk.Frame):
             messagebox.showwarning("Attention", "Veuillez sélectionner un dossier source.")
             return
         
-        self.logger.info(f"Création et préparation du dossier de transfert pour: {source}")
-        transfer_folder = self.folder_manager.get_transfer_folder_path(source)
+        # Disable buttons to prevent re-entry
+        self.transfer_button.config(state=tk.DISABLED)
         
-        # We need to wipe it first if it exists to ensure clean state
-        if transfer_folder.exists():
-             if not self.folder_manager.delete_transfer_folder(source):
-                 return
+        def run_creation():
+            try:
+                self.logger.info(f"Création et préparation du dossier de transfert pour: {source}")
+                transfer_folder = self.folder_manager.get_transfer_folder_path(source)
+                
+                # We need to wipe it first if it exists to ensure clean state
+                if transfer_folder.exists():
+                     if not self.folder_manager.delete_transfer_folder(source):
+                         self.master.after(0, lambda: messagebox.showerror("Erreur", "Impossible de supprimer l'ancien dossier."))
+                         return
 
-        # Use TransferManager to prepare files into this folder
-        if self.transfer_manager.prepare_transfer(source, transfer_folder):
-            messagebox.showinfo("Succès", "Dossier de transfert créé et préparé.")
-        else:
-            messagebox.showerror("Erreur", "Impossible de créer le dossier de transfert (voir logs).")
+                # Use TransferManager to prepare files into this folder
+                if self.transfer_manager.prepare_transfer(source, transfer_folder):
+                    self.master.after(0, lambda: messagebox.showinfo("Succès", "Dossier de transfert créé et préparé."))
+                else:
+                    self.master.after(0, lambda: messagebox.showerror("Erreur", "Impossible de créer le dossier de transfert (voir logs)."))
+            except Exception as e:
+                self.logger.error(f"Erreur thread création: {e}")
+            finally:
+                # Re-enable buttons
+                self.master.after(0, lambda: self.transfer_button.config(state=tk.NORMAL))
+
+        threading.Thread(target=run_creation, daemon=True).start()
 
     def delete_transfer_folder_action(self):
         source = self.source_dir.get()
@@ -999,22 +1013,28 @@ class Application(tk.Frame):
         use_transfer_folder = self.config.get("use_transfer_folder", False)
         
         def run_transfer():
+            success = False
             try:
                 if use_transfer_folder:
                     transfer_folder = self.folder_manager.get_transfer_folder_path(source)
                     # Use specialized transfer method
-                    self.transfer_manager.transfer_from_prepared_folder(transfer_folder, target, devices[0])
+                    success = self.transfer_manager.transfer_from_prepared_folder(transfer_folder, target, devices[0])
                 else:
                     # Standard transfer
                     if len(devices) == 1:
-                        self.transfer_manager.start_transfer(source, target, devices[0])
+                        success = self.transfer_manager.start_transfer(source, target, devices[0])
                     else:
                         self.run_multi_device_transfer(source, target, devices)
-            finally:
-                self.is_transferring = False
-                self.master.after(0, lambda: self.transfer_button.config(state=tk.NORMAL))
-                self.master.after(0, lambda: self.settings_button.config(state=tk.NORMAL))
-                self.master.after(0, lambda: self.cancel_button.pack_forget())
+                        return  # Multi-device handles its own cleanup
+            except Exception as e:
+                self.logger.error(f"Erreur lors du transfert: {e}")
+                success = False
+            
+            # Call cleanup with success info for single-device transfers
+            self.master.after(0, lambda: self._cleanup_transfer_ui(
+                success_count=1 if success else 0, 
+                total_count=1
+            ))
 
         # Check folder existence if needed
         if use_transfer_folder:
@@ -1036,6 +1056,11 @@ class Application(tk.Frame):
         
         # Show cancel button
         self.cancel_button.pack(pady=5)
+        
+        # Start timer
+        self.transfer_start_time = time.time()
+        self.timer_running = True
+        self.update_timer()
         
         threading.Thread(target=run_transfer, daemon=True).start()
 
@@ -1071,11 +1096,6 @@ class Application(tk.Frame):
         phase_timestamps = {
             "transfer_start": datetime.now().isoformat()
         }
-
-        # Start timer
-        self.transfer_start_time = time.time()
-        self.timer_running = True
-        self.after(100, self.update_timer)
 
         self.logger.info(f"===== Transfert vers {len(devices)} appareil(s) =====")
 
@@ -1224,13 +1244,16 @@ class Application(tk.Frame):
             
         except Exception as e:
             self.logger.error(f"Erreur critique lors du transfert: {e}")
-        finally:
-            self._cleanup_transfer_ui()
+            self._cleanup_transfer_ui(success_count=0, total_count=len(devices))
+            return
+        
+        self._cleanup_transfer_ui(success_count=success_count, total_count=total_count)
             
-    def _cleanup_transfer_ui(self):
+    def _cleanup_transfer_ui(self, success_count=None, total_count=None):
         """Reset UI state after transfer ends."""
         # Stop timer
         self.timer_running = False
+        elapsed = 0
         if self.transfer_start_time:
             elapsed = time.time() - self.transfer_start_time
             self.logger.info(f"Durée totale: {int(elapsed//3600):02d}:{int((elapsed%3600)//60):02d}:{int(elapsed%60):02d}")
@@ -1244,6 +1267,29 @@ class Application(tk.Frame):
         # Re-enable buttons
         self.transfer_button.config(state=tk.NORMAL)
         self.settings_button.config(state=tk.NORMAL)
+        
+        # Show completion notification
+        if success_count is not None and total_count is not None:
+            duration_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
+            if success_count == total_count:
+                self.master.after(0, lambda: messagebox.showinfo(
+                    "Transfert Terminé ✓",
+                    f"Transfert réussi sur {success_count}/{total_count} appareil(s).\n\n"
+                    f"Durée: {duration_str}"
+                ))
+            elif success_count > 0:
+                self.master.after(0, lambda: messagebox.showwarning(
+                    "Transfert Partiel",
+                    f"Transfert réussi sur {success_count}/{total_count} appareil(s).\n"
+                    f"Échec sur {total_count - success_count} appareil(s).\n\n"
+                    f"Durée: {duration_str}\n\nConsultez les logs pour plus de détails."
+                ))
+            else:
+                self.master.after(0, lambda: messagebox.showerror(
+                    "Transfert Échoué",
+                    f"Échec du transfert sur tous les appareils ({total_count}).\n\n"
+                    f"Durée: {duration_str}\n\nConsultez les logs pour plus de détails."
+                ))
 
     def _cancel_current_operation(self):
         """Cancel the current transfer/reassembly operation."""
@@ -1932,6 +1978,17 @@ class Application(tk.Frame):
             at_bottom = True
 
         self.progress_text.insert(tk.END, str(message) + "\n", tag)
+        
+        # Limit log to 5000 lines to prevent memory leak
+        try:
+            # check number of lines
+            line_count = int(self.progress_text.index('end-1c').split('.')[0])
+            if line_count > 5000:
+                # delete lines from top to keep it at 5000
+                lines_to_delete = line_count - 5000
+                self.progress_text.delete("1.0", f"{lines_to_delete + 1}.0")
+        except Exception:
+            pass
         
         # Only auto-scroll if we were already at the bottom
         if at_bottom:

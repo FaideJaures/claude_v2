@@ -25,7 +25,10 @@ class Adb:
         else:
             command_list = [adb_path] + shlex.split(command)
         
-        self.logger.info(f"Exécution de la commande: {' '.join(command_list)}")
+        # Only log commands in verbose mode (reduces noise significantly)
+        if getattr(self.logger, 'verbose', False):
+            self.logger.info(f"Exécution de la commande: {' '.join(command_list)}")
+        
         try:
             # Suppress window creation on Windows
             startupinfo = None
@@ -52,12 +55,13 @@ class Adb:
                 if output == '' and process.poll() is not None:
                     break
                 if output:
-                    self.logger.info(output.strip())
                     output_lines.append(output.strip())
 
             rc = process.poll()
             if rc != 0:
-                self.logger.error(f"Erreur lors de l'exécution de la commande ADB. Code de sortie: {rc}")
+                # Only log errors (not every failed command - some are expected like stat on missing files)
+                if getattr(self.logger, 'verbose', False):
+                    self.logger.error(f"Erreur ADB (code {rc}): {' '.join(command_list[:3])}...")
                 return None
             
             return output_lines

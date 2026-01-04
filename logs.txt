@@ -1,0 +1,136 @@
+[18:37:15] Configuration enregistrée.
+[18:37:15] [R8YW50DR1WK] Démarrage du transfert depuis dossier préparé: C:\Users\hp\Videos\Screen Recordings_for_transfer
+[18:37:15] [R8YW50DR1WK] 1 manifestes chargés.
+[18:37:15] [R8YW50DR1WK] Transfert des fichiers...
+[18:37:15] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell mkdir -p /sdcard/transfer_temp
+[18:37:15] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell mkdir -p /sdcard/transfer_temp/Screen Recording 2025-10-16 122710_chunks
+[18:37:15] mkdir: 'Recording': Read-only file system
+[18:37:15] mkdir: '2025-10-16': Read-only file system
+[18:37:15] mkdir: '122710_chunks': Read-only file system
+[18:37:15] Erreur lors de l'exécution de la commande ADB. Code de sortie: 1
+[18:37:15] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/Screen Recording 2025-10-16 122710_chunks/chunk_0000.bin 2>/dev/null
+[18:37:15] 3452
+[18:37:15] Erreur lors de l'exécution de la commande ADB. Code de sortie: 1
+[18:37:15] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/Screen Recording 2025-10-16 122710_chunks/chunk_0001.bin 2>/dev/null
+[18:37:15] 3452
+[18:37:15] Erreur lors de l'exécution de la commande ADB. Code de sortie: 1
+[18:37:15] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/Screen Recording 2025-10-16 122710_chunks/chunk_0002.bin 2>/dev/null
+[18:37:15] 3452
+[18:37:15] Erreur lors de l'exécution de la commande ADB. Code de sortie: 1
+[18:37:15] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/Screen Recording 2025-10-16 122710_chunks/chunk_0003.bin 2>/dev/null
+[18:37:15] 3452
+[18:37:15] Erreur lors de l'exécution de la commande ADB. Code de sortie: 1
+[18:37:15] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_000.zip 2>/dev/null
+[18:37:15] Erreur lors de l'exécution de la commande ADB. Code de sortie: 1
+[18:37:15] [R8YW50DR1WK] Transfert de bundle_batch_000.zip (493.71 MB)...
+[18:37:15] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK push C:\Users\hp\Videos\Screen Recordings_for_transfer\bundle_batch_000.zip /sdcard/transfer_temp/bundle_batch_000.zip
+[18:37:32] C:\Users\hp\Videos\Screen Recordings_for_transfer\bundle_batch_000.zip: 1 file pushed, 0 skipped. 30.4 MB/s (517689871 bytes in 16.251s)
+[18:37:32] [R8YW50DR1WK] bundle_batch_000.zip transféré avec succès
+[18:37:32] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_001.zip 2>/dev/null
+[18:37:32] Erreur lors de l'exécution de la commande ADB. Code de sortie: 1
+[18:37:32] [R8YW50DR1WK] Transfert de bundle_batch_001.zip (498.74 MB)...
+[18:37:32] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK push C:\Users\hp\Videos\Screen Recordings_for_transfer\bundle_batch_001.zip /sdcard/transfer_temp/bundle_batch_001.zip
+[18:37:48] C:\Users\hp\Videos\Screen Recordings_for_transfer\bundle_batch_001.zip: 1 file pushed, 0 skipped. 30.0 MB/s (522967621 bytes in 16.642s)
+[18:37:49] [R8YW50DR1WK] bundle_batch_001.zip transféré avec succès
+[18:37:49] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_002.zip 2>/dev/null
+[18:37:49] Erreur lors de l'exécution de la commande ADB. Code de sortie: 1
+[18:37:49] [R8YW50DR1WK] Transfert de bundle_batch_002.zip (499.22 MB)...
+[18:37:49] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK push C:\Users\hp\Videos\Screen Recordings_for_transfer\bundle_batch_002.zip /sdcard/transfer_temp/bundle_batch_002.zip
+[18:38:04] C:\Users\hp\Videos\Screen Recordings_for_transfer\bundle_batch_002.zip: 1 file pushed, 0 skipped. 32.0 MB/s (523471872 bytes in 15.622s)
+[18:38:04] [R8YW50DR1WK] bundle_batch_002.zip transféré avec succès
+[18:38:04] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_003.zip 2>/dev/null
+[18:38:04] Erreur lors de l'exécution de la commande ADB. Code de sortie: 1
+[18:38:04] [R8YW50DR1WK] Transfert de bundle_batch_003.zip (486.11 MB)...
+[18:38:04] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK push C:\Users\hp\Videos\Screen Recordings_for_transfer\bundle_batch_003.zip /sdcard/transfer_temp/bundle_batch_003.zip
+[18:38:20] C:\Users\hp\Videos\Screen Recordings_for_transfer\bundle_batch_003.zip: 1 file pushed, 0 skipped. 31.3 MB/s (509726910 bytes in 15.544s)
+[18:38:20] [R8YW50DR1WK] bundle_batch_003.zip transféré avec succès
+[18:38:20] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_004.zip 2>/dev/null
+[18:38:20] Erreur lors de l'exécution de la commande ADB. Code de sortie: 1
+[18:38:20] [R8YW50DR1WK] Transfert de bundle_batch_004.zip (492.91 MB)...
+[18:38:20] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK push C:\Users\hp\Videos\Screen Recordings_for_transfer\bundle_batch_004.zip /sdcard/transfer_temp/bundle_batch_004.zip
+[18:38:36] C:\Users\hp\Videos\Screen Recordings_for_transfer\bundle_batch_004.zip: 1 file pushed, 0 skipped. 30.8 MB/s (516853926 bytes in 16.017s)
+[18:38:36] [R8YW50DR1WK] bundle_batch_004.zip transféré avec succès
+[18:38:36] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_005.zip 2>/dev/null
+[18:38:37] Erreur lors de l'exécution de la commande ADB. Code de sortie: 1
+[18:38:37] [R8YW50DR1WK] Transfert de bundle_batch_005.zip (358.48 MB)...
+[18:38:37] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK push C:\Users\hp\Videos\Screen Recordings_for_transfer\bundle_batch_005.zip /sdcard/transfer_temp/bundle_batch_005.zip
+[18:38:48] C:\Users\hp\Videos\Screen Recordings_for_transfer\bundle_batch_005.zip: 1 file pushed, 0 skipped. 32.5 MB/s (375888333 bytes in 11.019s)
+[18:38:48] [R8YW50DR1WK] bundle_batch_005.zip transféré avec succès
+[18:38:48] [R8YW50DR1WK] Transfert de 5 fichiers avec 10 workers...
+[18:38:48] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK push C:\Users\hp\Videos\Screen Recordings\Screen Recording 2025-10-16 122710_chunks\chunk_0000.bin /sdcard/transfer_temp/Screen Recording 2025-10-16 122710_chunks/chunk_0000.bin
+[18:38:48] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK push C:\Users\hp\Videos\Screen Recordings\Screen Recording 2025-10-16 122710_chunks\chunk_0001.bin /sdcard/transfer_temp/Screen Recording 2025-10-16 122710_chunks/chunk_0001.bin
+[18:38:48] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK push C:\Users\hp\Videos\Screen Recordings\Screen Recording 2025-10-16 122710_chunks\chunk_metadata.json /sdcard/transfer_temp/Screen Recording 2025-10-16 122710_chunks/chunk_metadata.json
+[18:38:48] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK push C:\Users\hp\Videos\Screen Recordings\Screen Recording 2025-10-16 122710_chunks\chunk_0002.bin /sdcard/transfer_temp/Screen Recording 2025-10-16 122710_chunks/chunk_0002.bin
+[18:38:48] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK push C:\Users\hp\Videos\Screen Recordings\Screen Recording 2025-10-16 122710_chunks\chunk_0003.bin /sdcard/transfer_temp/Screen Recording 2025-10-16 122710_chunks/chunk_0003.bin
+[18:38:48] C:\Users\hp\Videos\Screen Recordings\Screen Recording 2025-10-16 122710_chunks\chunk_metadata.json: 1 file pushed, 0 skipped. 0.6 MB/s (977 bytes in 0.002s)
+[18:38:49] C:\Users\hp\Videos\Screen Recordings\Screen Recording 2025-10-16 122710_chunks\chunk_0003.bin: 1 file pushed, 0 skipped. 72.2 MB/s (85600308 bytes in 1.130s)
+[18:38:49] C:\Users\hp\Videos\Screen Recordings\Screen Recording 2025-10-16 122710_chunks\chunk_0000.bin: 1 file pushed, 0 skipped. 112.3 MB/s (157286400 bytes in 1.335s)
+[18:38:50] C:\Users\hp\Videos\Screen Recordings\Screen Recording 2025-10-16 122710_chunks\chunk_0001.bin: 1 file pushed, 0 skipped. 58.5 MB/s (157286400 bytes in 2.563s)
+[18:38:51] C:\Users\hp\Videos\Screen Recordings\Screen Recording 2025-10-16 122710_chunks\chunk_0002.bin: 1 file pushed, 0 skipped. 56.9 MB/s (157286400 bytes in 2.637s)
+[18:38:53] [R8YW50DR1WK] Transfert terminé: 5 fichiers
+[18:38:53] [R8YW50DR1WK] Vérification des fichiers transférés...
+[18:38:53] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell [ -f /sdcard/transfer_temp/Screen Recording 2025-10-16 122710_chunks/chunk_metadata.json ] && echo exists
+[18:38:53] /system/bin/sh: [: Recording: unexpected operator/operand
+[18:38:53] Erreur lors de l'exécution de la commande ADB. Code de sortie: 2
+[18:38:53] [R8YW50DR1WK] Metadata manquant: Screen Recording 2025-10-16 122710_chunks
+[18:38:53] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_000.zip 2>/dev/null
+[18:38:54] 517689871
+[18:38:54] [R8YW50DR1WK] bundle_batch_000.zip vérifié (493.71 MB)
+[18:38:54] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_001.zip 2>/dev/null
+[18:38:54] 522967621
+[18:38:54] [R8YW50DR1WK] bundle_batch_001.zip vérifié (498.74 MB)
+[18:38:54] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_002.zip 2>/dev/null
+[18:38:54] 523471872
+[18:38:54] [R8YW50DR1WK] bundle_batch_002.zip vérifié (499.22 MB)
+[18:38:54] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_003.zip 2>/dev/null
+[18:38:54] 509726910
+[18:38:54] [R8YW50DR1WK] bundle_batch_003.zip vérifié (486.11 MB)
+[18:38:54] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_004.zip 2>/dev/null
+[18:38:54] 516853926
+[18:38:54] [R8YW50DR1WK] bundle_batch_004.zip vérifié (492.91 MB)
+[18:38:54] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_005.zip 2>/dev/null
+[18:38:54] 375888333
+[18:38:54] [R8YW50DR1WK] bundle_batch_005.zip vérifié (358.48 MB)
+[18:38:54] [R8YW50DR1WK] Tentative de retransfert de 1 fichiers manquants...
+[18:38:54] [R8YW50DR1WK] Nouvelle tentative pour 1 fichiers...
+[18:38:54] [R8YW50DR1WK] Tentative 1/10000
+[18:38:54] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK push C:\Users\hp\Videos\Screen Recordings\Screen Recording 2025-10-16 122710_chunks\chunk_metadata.json /sdcard/transfer_temp/Screen Recording 2025-10-16 122710_chunks/chunk_metadata.json
+[18:38:54] C:\Users\hp\Videos\Screen Recordings\Screen Recording 2025-10-16 122710_chunks\chunk_metadata.json: 1 file pushed, 0 skipped. 4.6 MB/s (977 bytes in 0.000s)
+[18:38:54] [R8YW50DR1WK] ✅ Réussi: chunk_metadata.json
+[18:38:54] [R8YW50DR1WK] ✅ Tous les fichiers manquants ont été retransférés
+[18:38:54] [R8YW50DR1WK] Vérification des fichiers transférés...
+[18:38:54] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell [ -f /sdcard/transfer_temp/Screen Recording 2025-10-16 122710_chunks/chunk_metadata.json ] && echo exists
+[18:38:54] /system/bin/sh: [: Recording: unexpected operator/operand
+[18:38:54] Erreur lors de l'exécution de la commande ADB. Code de sortie: 2
+[18:38:54] [R8YW50DR1WK] Metadata manquant: Screen Recording 2025-10-16 122710_chunks
+[18:38:54] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_000.zip 2>/dev/null
+[18:38:54] 517689871
+[18:38:54] [R8YW50DR1WK] bundle_batch_000.zip vérifié (493.71 MB)
+[18:38:55] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_001.zip 2>/dev/null
+[18:38:55] 522967621
+[18:38:55] [R8YW50DR1WK] bundle_batch_001.zip vérifié (498.74 MB)
+[18:38:55] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_002.zip 2>/dev/null
+[18:38:55] 523471872
+[18:38:55] [R8YW50DR1WK] bundle_batch_002.zip vérifié (499.22 MB)
+[18:38:55] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_003.zip 2>/dev/null
+[18:38:55] 509726910
+[18:38:55] [R8YW50DR1WK] bundle_batch_003.zip vérifié (486.11 MB)
+[18:38:55] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_004.zip 2>/dev/null
+[18:38:55] 516853926
+[18:38:55] [R8YW50DR1WK] bundle_batch_004.zip vérifié (492.91 MB)
+[18:38:55] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK shell stat -c%s /sdcard/transfer_temp/bundle_batch_005.zip 2>/dev/null
+[18:38:55] 375888333
+[18:38:55] [R8YW50DR1WK] bundle_batch_005.zip vérifié (358.48 MB)
+[18:38:55] [R8YW50DR1WK] Tentative de retransfert de 1 fichiers manquants...
+[18:38:55] [R8YW50DR1WK] Nouvelle tentative pour 1 fichiers...
+[18:38:55] [R8YW50DR1WK] Tentative 1/10000
+[18:38:55] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe -s R8YW50DR1WK push C:\Users\hp\Videos\Screen Recordings\Screen Recording 2025-10-16 122710_chunks\chunk_metadata.json /sdcard/transfer_temp/Screen Recording 2025-10-16 122710_chunks/chunk_metadata.json
+[18:38:55] C:\Users\hp\Videos\Screen Recordings\Screen Recording 2025-10-16 122710_chunks\chunk_metadata.json: 1 file pushed, 0 skipped. 4.6 MB/s (977 bytes in 0.000s)
+[18:38:55] [R8YW50DR1WK] ✅ Réussi: chunk_metadata.json
+[18:38:55] [R8YW50DR1WK] ✅ Tous les fichiers manquants ont été retransférés
+[18:38:55] [R8YW50DR1WK] Max verification depth reached, abandoning retry
+[18:38:55] [R8YW50DR1WK] Vérification échouée
+[18:38:56] Exécution de la commande: C:\Users\hp\Desktop\claude_v2\platform-tools\adb.exe devices -l
+[18:38:56] List of devices attached
+[18:38:56] R8YW50DR1WK            device product:gta8xx model:SM_X205 device:gta8 transport_id:5
+[18:38:56] 
