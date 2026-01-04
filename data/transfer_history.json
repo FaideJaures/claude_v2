@@ -143,6 +143,42 @@
         "phase2_start": "2026-01-04T16:08:40.142196",
         "phase2_end": "2026-01-04T16:09:00.388441"
       }
+    },
+    {
+      "process_name": "Transfer 2026-01-04 15:59",
+      "device_id": "R8YW50DR1WK",
+      "device_bluetooth_name": "RGPL2023TAB0445",
+      "status": "completed",
+      "files_count": 236,
+      "bytes_transferred": 0,
+      "duration_seconds": 41.106653690338135,
+      "started_at": "2026-01-04T16:30:54.569333",
+      "completed_at": "2026-01-04T16:31:35.676826",
+      "phases": {
+        "transfer_start": "2026-01-04T16:30:54.569333",
+        "phase1_start": "2026-01-04T16:31:02.989735",
+        "phase1_end": "2026-01-04T16:31:14.133464",
+        "phase2_start": "2026-01-04T16:31:14.163390",
+        "phase2_end": "2026-01-04T16:31:35.644040"
+      }
+    },
+    {
+      "process_name": "Transfer 2026-01-04 15:59",
+      "device_id": "R8YW50DR1WK",
+      "device_bluetooth_name": "RGPL2023TAB0445",
+      "status": "completed",
+      "files_count": 18137,
+      "bytes_transferred": 0,
+      "duration_seconds": 939.7563779354095,
+      "started_at": "2026-01-04T16:34:13.557422",
+      "completed_at": "2026-01-04T16:49:53.313860",
+      "phases": {
+        "transfer_start": "2026-01-04T16:34:13.557422",
+        "phase1_start": "2026-01-04T16:38:35.409835",
+        "phase1_end": "2026-01-04T16:39:29.828833",
+        "phase2_start": "2026-01-04T16:39:29.845734",
+        "phase2_end": "2026-01-04T16:49:53.266246"
+      }
     }
   ]
 }

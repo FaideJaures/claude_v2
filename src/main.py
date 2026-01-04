@@ -948,9 +948,17 @@ class Application(tk.Frame):
             messagebox.showwarning("Attention", "Veuillez sélectionner un dossier source.")
             return
         
-        self.logger.info(f"Création du dossier de transfert pour: {source}")
-        if self.folder_manager.create_transfer_folder(source):
-            messagebox.showinfo("Succès", "Dossier de transfert créé.")
+        self.logger.info(f"Création et préparation du dossier de transfert pour: {source}")
+        transfer_folder = self.folder_manager.get_transfer_folder_path(source)
+        
+        # We need to wipe it first if it exists to ensure clean state
+        if transfer_folder.exists():
+             if not self.folder_manager.delete_transfer_folder(source):
+                 return
+
+        # Use TransferManager to prepare files into this folder
+        if self.transfer_manager.prepare_transfer(source, transfer_folder):
+            messagebox.showinfo("Succès", "Dossier de transfert créé et préparé.")
         else:
             messagebox.showerror("Erreur", "Impossible de créer le dossier de transfert (voir logs).")
 
@@ -982,34 +990,54 @@ class Application(tk.Frame):
         if not devices:
             messagebox.showerror("Erreur", "Veuillez sélectionner au moins un appareil.")
             return
-            
-        # Handle Transfer Folder Logic
-        if self.config.get("use_transfer_folder", False):
-            transfer_folder = self.folder_manager.get_transfer_folder_path(source)
-            if not transfer_folder.exists():
-                # Ask user if they want to create it
-                if messagebox.askyesno("Dossier Transfert Manquant", 
-                                      f"Le dossier de transfert n'existe pas:\n{transfer_folder}\n\nVoulez-vous le créer maintenant ?"):
-                    if not self.folder_manager.create_transfer_folder(source):
-                        return # Error already shown/logged
-                else:
-                    return # User cancelled
-            
-            # Use the transfer folder as the actual source
-            self.logger.info(f"Utilisation du dossier de transfert: {transfer_folder}")
-            source = str(transfer_folder)
-
+        
         self.save_config()
-
         self.transfer_button.config(state=tk.DISABLED)
         self.settings_button.config(state=tk.DISABLED)
         
+        # Handle Transfer Folder Logic
+        use_transfer_folder = self.config.get("use_transfer_folder", False)
+        
+        def run_transfer():
+            try:
+                if use_transfer_folder:
+                    transfer_folder = self.folder_manager.get_transfer_folder_path(source)
+                    # Use specialized transfer method
+                    self.transfer_manager.transfer_from_prepared_folder(transfer_folder, target, devices[0])
+                else:
+                    # Standard transfer
+                    if len(devices) == 1:
+                        self.transfer_manager.start_transfer(source, target, devices[0])
+                    else:
+                        self.run_multi_device_transfer(source, target, devices)
+            finally:
+                self.is_transferring = False
+                self.master.after(0, lambda: self.transfer_button.config(state=tk.NORMAL))
+                self.master.after(0, lambda: self.settings_button.config(state=tk.NORMAL))
+                self.master.after(0, lambda: self.cancel_button.pack_forget())
+
+        # Check folder existence if needed
+        if use_transfer_folder:
+            transfer_folder = self.folder_manager.get_transfer_folder_path(source)
+            if not transfer_folder.exists():
+                if messagebox.askyesno("Dossier Transfert Manquant", 
+                                      f"Le dossier de transfert n'existe pas:\n{transfer_folder}\n\nVoulez-vous le préparer maintenant ?"):
+                    # Run preparation in main thread (blocking for now, or could act as quick prep)
+                    if not self.transfer_manager.prepare_transfer(source, transfer_folder):
+                        self.transfer_button.config(state=tk.NORMAL)
+                        self.settings_button.config(state=tk.NORMAL)
+                        return
+                else:
+                    self.transfer_button.config(state=tk.NORMAL)
+                    self.settings_button.config(state=tk.NORMAL)
+                    return
+
+        self.is_transferring = True
+        
         # Show cancel button
         self.cancel_button.pack(pady=5)
-
-        # Start multi-device transfer
-        transfer_thread = threading.Thread(target=self.run_multi_device_transfer, args=(source, target, devices))
-        transfer_thread.start()
+        
+        threading.Thread(target=run_transfer, daemon=True).start()
 
     def update_timer(self):
         """Update the transfer timer display."""

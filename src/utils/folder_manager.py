@@ -21,38 +21,9 @@ class TransferFolderManager:
         name = source_path.name
         return parent / f"{name}_for_transfer"
 
-    def create_transfer_folder(self, source_folder: str) -> bool:
-        """
-        Creates a copy of source_folder named 'foldername_for_transfer'
-        at the same level as the source folder.
-        """
-        source_path = Path(source_folder)
-        dest_path = self.get_transfer_folder_path(source_folder)
+    # create_transfer_folder is removed as it's superseded by TransferManager.prepare_transfer
+    # which handles chunking and bundling instead of raw copy.
 
-        if not source_path.exists():
-            if self.logger:
-                self.logger.error(f"Source folder does not exist: {source_path}")
-            return False
-
-        if dest_path.exists():
-            if self.logger:
-                self.logger.warning(f"Transfer folder already exists: {dest_path}")
-            return False
-
-        try:
-            if self.logger:
-                self.logger.info(f"Copying {source_path} to {dest_path}...")
-            
-            # Use shutil.copytree to copy the entire directory tree
-            shutil.copytree(source_path, dest_path)
-            
-            if self.logger:
-                self.logger.success(f"Dossier de transfert créé: {dest_path}")
-            return True
-        except Exception as e:
-            if self.logger:
-                self.logger.error(f"Error creating transfer folder: {e}")
-            return False
 
     def delete_transfer_folder(self, source_folder: str) -> bool:
         """

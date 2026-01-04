@@ -88,15 +88,119 @@ class TransferManager:
         total_time = time.time() - total_start_time
         self.logger.success(f"Transfert terminé avec succès en {total_time:.2f} secondes !")
 
+    def prepare_transfer(self, source_dir, output_dir):
+        """
+        Prepare files for transfer (factorization): chunk and bundle to output_dir.
+        Saves a transfer_state.json for later use.
+        """
+        try:
+            self.logger.info(f"Préparation du transfert (factorisation) dans {output_dir}...")
+            
+            output_path = Path(output_dir)
+            if not output_path.exists():
+                output_path.mkdir(parents=True)
+            
+            # 1. Scan files
+            self.logger.info("Analyse des fichiers...")
+            self.scan_files(source_dir)
+            self.logger.info(f"{len(self.files_to_chunk)} fichiers à fragmenter.")
+            self.logger.info(f"{len(self.files_to_batch)} fichiers à traiter en lots.")
+
+            # 2. Process files (chunking and batching) to output_dir
+            chunking_start_time = time.time()
+            self.logger.info("Traitement des fichiers...")
+            self.process_files(Path(source_dir), output_folder=output_path)
+            chunking_time = time.time() - chunking_start_time
+            self.logger.info(f"Temps de traitement: {chunking_time:.2f} secondes.")
+            
+            # 3. Save transfer state
+            state = {
+                "manifests": self.manifests,
+                "timestamp": time.time(),
+                "source_dir": source_dir
+            }
+            with open(output_path / "transfer_state.json", "w") as f:
+                json.dump(state, f, indent=2)
+                
+            self.logger.success(f"Préparation terminée dans {output_dir}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Erreur lors de la préparation: {e}")
+            return False
+
+    def transfer_from_prepared_folder(self, prepared_dir, target_dir, device_id):
+        """
+        Transfer pre-processed files from prepared_dir to device without reanalysis.
+        """
+        try:
+            self.logger.info(f"[{device_id}] Démarrage du transfert depuis dossier préparé: {prepared_dir}")
+            
+            prepared_path = Path(prepared_dir)
+            
+            # Load state
+            state_file = prepared_path / "transfer_state.json"
+            if not state_file.exists():
+                self.logger.error(f"[{device_id}] Fichier d'état introuvable dans {prepared_dir}")
+                # Fallback: try to reconstruct state? For now, fail.
+                return False
+                
+            with open(state_file, "r") as f:
+                state = json.load(f)
+                
+            self.manifests = state.get("manifests", [])
+            self.logger.info(f"[{device_id}] {len(self.manifests)} manifestes chargés.")
+            
+            # Initialize temp_dir to point to prepared_dir for parallel_transfer to work
+            # Note: parallel_transfer expects self.temp_dir to contain the bundles and chunks
+            original_temp_dir = getattr(self, 'temp_dir', None)
+            self.temp_dir = prepared_path
+            
+            try:
+                # 3. Transfer files
+                self.logger.info(f"[{device_id}] Transfert des fichiers...")
+                remote_temp_dir = self.config.get("remote_temp_dir", "/sdcard/transfer_temp")
+                success = self.parallel_transfer(remote_temp_dir, device_id)
+                if not success:
+                    return False
+                    
+                self.logger.success(f"[{device_id}] Transfert terminé.")
+                
+                # 4. Reassemble
+                reassembly_manager = ReassemblyManager(
+                    self.config, 
+                    self.logger, 
+                    self.adb, 
+                    device_id,
+                    modal_callback=getattr(self, 'modal_callback', None)
+                )
+                
+                # For initialized transfer, we might want to check the script method
+                if self.config.get("use_adb_shell_mode", True):
+                    return reassembly_manager.reassemble_via_adb_shell(remote_temp_dir, target_dir)
+                else:
+                    return reassembly_manager.reassemble_via_termux(remote_temp_dir, target_dir)
+
+            finally:
+                # Restore temp_dir just in case (though object might be discarded)
+                if original_temp_dir:
+                    self.temp_dir = original_temp_dir
+                    
+        except Exception as e:
+            self.logger.error(f"[{device_id}] Erreur lors du transfert factorisé: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
     def transfer_only(self, source_dir, target_dir, device_id):
         """
         Transfer files to device without reassembly (for multi-device parallel transfer).
-
+        
         Returns:
             True if transfer successful, False otherwise
         """
         try:
-            self.logger.info(f"[{device_id}] Initialisation du transfert...")
+            self.logger.info(f"[{device_id}] Initialisation du transfert direct...")
 
             # Note: Termux check removed - now done at startup
 
@@ -159,17 +263,32 @@ class TransferManager:
             else:
                 self.files_to_batch.append((file_path, file_size))  # Store size for bin packing
 
-    def process_files(self, source_dir: Path):
+    def process_files(self, source_dir: Path, output_folder: Path = None, use_persistent_chunks: bool = True):
+        """
+        Process files: chunk large files and batch small files into bundles.
+        
+        Args:
+            source_dir: Source directory path.
+            output_folder: Directory where chunks and bundles will be created.
+                           Defaults to self.temp_dir if None.
+            use_persistent_chunks: If True, chunks are created next to source (caching).
+                                   If False, chunks are created in output_folder.
+        """
+        if output_folder is None:
+            output_folder = self.temp_dir
+
+        self.logger.info(f"Traitement des fichiers dans {output_folder} (persist: {use_persistent_chunks})...")
+
         # Process large files
         for file_path in self.files_to_chunk:
             manifest = FileChunker.chunk_file(
                 file_path=file_path,
                 source_folder=source_dir,
-                output_folder=self.temp_dir,
+                output_folder=output_folder,
                 chunk_size_bytes=self.config.get("chunk_size", 100 * 1024 * 1024),
                 progress_callback=self.logger.info,
                 logger=self.logger,
-                persistent_chunks=True,  # Enable persistent chunks
+                persistent_chunks=use_persistent_chunks,  # Explicitly controlled
             )
             self.manifests.append(manifest)
 
@@ -187,7 +306,7 @@ class TransferManager:
             
             for i, bundle_files in enumerate(bundles):
                 bundle_name = f"bundle_batch_{i:03d}.zip" if len(bundles) > 1 else "bundle_batch.zip"
-                bundle_path = self.temp_dir / bundle_name
+                bundle_path = output_folder / bundle_name
                 
                 with zipfile.ZipFile(bundle_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
                     # Use compression level 1 (fastest) - we want speed, not max compression
