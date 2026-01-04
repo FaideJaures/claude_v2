@@ -1,0 +1,148 @@
+{
+  "records": [
+    {
+      "process_name": "Estuaire",
+      "device_id": "R9TY608ZD7T",
+      "device_bluetooth_name": "Tab A9+ de RGPL",
+      "status": "completed",
+      "files_count": 215,
+      "bytes_transferred": 0,
+      "duration_seconds": 37.40949535369873,
+      "started_at": "2025-12-31T14:27:31.604047",
+      "completed_at": "2025-12-31T14:28:09.013563",
+      "phases": {
+        "transfer_start": "2025-12-31T14:27:31.604047",
+        "phase1_start": "2025-12-31T14:27:37.820611",
+        "phase1_end": "2025-12-31T14:27:49.578041",
+        "phase2_start": "2025-12-31T14:27:49.581089",
+        "phase2_end": "2025-12-31T14:28:08.967437"
+      }
+    },
+    {
+      "process_name": "Estuaire",
+      "device_id": "R8YW50DR1WK",
+      "device_bluetooth_name": "RGPL2023TAB0445",
+      "status": "completed",
+      "files_count": 215,
+      "bytes_transferred": 0,
+      "duration_seconds": 37.40949535369873,
+      "started_at": "2025-12-31T14:27:31.604047",
+      "completed_at": "2025-12-31T14:28:09.014153",
+      "phases": {
+        "transfer_start": "2025-12-31T14:27:31.604047",
+        "phase1_start": "2025-12-31T14:27:37.820611",
+        "phase1_end": "2025-12-31T14:27:49.578041",
+        "phase2_start": "2025-12-31T14:27:49.581089",
+        "phase2_end": "2025-12-31T14:28:08.967437"
+      }
+    },
+    {
+      "process_name": "Estuaire",
+      "device_id": "192.168.0.176:5555",
+      "device_bluetooth_name": "RGPL2025HISTAB00224",
+      "status": "failed",
+      "files_count": 215,
+      "bytes_transferred": 0,
+      "duration_seconds": 142.88686275482178,
+      "started_at": "2025-12-31T14:30:57.126576",
+      "completed_at": "2025-12-31T14:33:20.013455",
+      "phases": {
+        "transfer_start": "2025-12-31T14:30:57.126576",
+        "phase1_start": "2025-12-31T14:30:58.193236",
+        "phase1_end": "2025-12-31T14:32:46.082069",
+        "phase2_start": "2025-12-31T14:32:46.086955",
+        "phase2_end": "2025-12-31T14:33:20.001611"
+      }
+    },
+    {
+      "process_name": "Estuaire",
+      "device_id": "R9ZY40TL9BV",
+      "device_bluetooth_name": "RGPL2025HISTAB00224",
+      "status": "completed",
+      "files_count": 215,
+      "bytes_transferred": 0,
+      "duration_seconds": 26.352936267852783,
+      "started_at": "2025-12-31T14:34:08.547502",
+      "completed_at": "2025-12-31T14:34:34.900456",
+      "phases": {
+        "transfer_start": "2025-12-31T14:34:08.547502",
+        "phase1_start": "2025-12-31T14:34:09.579091",
+        "phase1_end": "2025-12-31T14:34:20.678802",
+        "phase2_start": "2025-12-31T14:34:20.681577",
+        "phase2_end": "2025-12-31T14:34:34.882388"
+      }
+    },
+    {
+      "process_name": "Estuaire",
+      "device_id": "R94XA0AGRVV",
+      "device_bluetooth_name": "AEL05",
+      "status": "completed",
+      "files_count": 215,
+      "bytes_transferred": 0,
+      "duration_seconds": 60.73184633255005,
+      "started_at": "2025-12-31T14:39:19.972561",
+      "completed_at": "2025-12-31T14:40:20.704427",
+      "phases": {
+        "transfer_start": "2025-12-31T14:39:19.972561",
+        "phase1_start": "2025-12-31T14:39:21.048972",
+        "phase1_end": "2025-12-31T14:39:51.821764",
+        "phase2_start": "2025-12-31T14:39:51.824729",
+        "phase2_end": "2025-12-31T14:40:20.683065"
+      }
+    },
+    {
+      "process_name": "Transfer 2026-01-04 13:43",
+      "device_id": "R8YW50DR1WK",
+      "device_bluetooth_name": "RGPL2023TAB0445",
+      "status": "completed",
+      "files_count": 18138,
+      "bytes_transferred": 0,
+      "duration_seconds": 631.7054440975189,
+      "started_at": "2026-01-04T13:46:22.104056",
+      "completed_at": "2026-01-04T13:56:53.809537",
+      "phases": {
+        "transfer_start": "2026-01-04T13:46:22.104056",
+        "phase1_start": "2026-01-04T13:49:10.269746",
+        "phase1_end": "2026-01-04T13:50:00.753779",
+        "phase2_start": "2026-01-04T13:50:00.797674",
+        "phase2_end": "2026-01-04T13:56:53.561706"
+      }
+    },
+    {
+      "process_name": "Transfer 2026-01-04 14:07",
+      "device_id": "R8YW50DR1WK",
+      "device_bluetooth_name": "RGPL2023TAB0445",
+      "status": "completed",
+      "files_count": 18137,
+      "bytes_transferred": 0,
+      "duration_seconds": 662.5581619739532,
+      "started_at": "2026-01-04T15:40:26.537261",
+      "completed_at": "2026-01-04T15:51:29.096251",
+      "phases": {
+        "transfer_start": "2026-01-04T15:40:26.537261",
+        "phase1_start": "2026-01-04T15:44:18.647824",
+        "phase1_end": "2026-01-04T15:45:08.583726",
+        "phase2_start": "2026-01-04T15:45:08.596139",
+        "phase2_end": "2026-01-04T15:51:28.900140"
+      }
+    },
+    {
+      "process_name": "Transfer 2026-01-04 15:59",
+      "device_id": "R8YW50DR1WK",
+      "device_bluetooth_name": "RGPL2023TAB0445",
+      "status": "completed",
+      "files_count": 236,
+      "bytes_transferred": 0,
+      "duration_seconds": 84.53180384635925,
+      "started_at": "2026-01-04T16:07:35.907493",
+      "completed_at": "2026-01-04T16:09:00.439320",
+      "phases": {
+        "transfer_start": "2026-01-04T16:07:35.907493",
+        "phase1_start": "2026-01-04T16:08:29.088231",
+        "phase1_end": "2026-01-04T16:08:40.110431",
+        "phase2_start": "2026-01-04T16:08:40.142196",
+        "phase2_end": "2026-01-04T16:09:00.388441"
+      }
+    }
+  ]
+}

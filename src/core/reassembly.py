@@ -38,13 +38,28 @@ class ReassemblyManager:
 
         # 3. Execute reassembly script in background
         self.logger.info("Exécution du script de réassemblage...")
-        cmd = f"cd {remote_temp_dir} && nohup sh ./unified.sh {remote_temp_dir} > /dev/null 2>&1 &"
+        # Capture output to log file for debugging
+        log_file = f"{remote_temp_dir}/reassembly.log"
+        cmd = f"cd {remote_temp_dir} && nohup sh ./unified.sh {remote_temp_dir} > {log_file} 2>&1 &"
         self.logger.info(f"[{self.device_id}] Commande: {cmd}")
         reassemble_cmd = f"shell '{cmd}'"
         self.adb.run_command(reassemble_cmd, self.device_id)
 
         # 4. Wait for completion using marker file
-        if not self._wait_for_reassembly_completion(remote_temp_dir):
+        success = self._wait_for_reassembly_completion(remote_temp_dir)
+        
+        # Always fetch and log the reassembly log for debugging
+        self.logger.info(f"[{self.device_id}] Récupération des logs de réassemblage...")
+        log_content = self.adb.run_command(f'shell "cat {log_file}"', self.device_id)
+        if log_content:
+            self.logger.info(f"[{self.device_id}] === LOGS DE RÉASSEMBLAGE ===")
+            for line in log_content:
+                self.logger.info(f"[{self.device_id}] [SCRIPT] {line}")
+            self.logger.info(f"[{self.device_id}] ============================")
+        else:
+            self.logger.warning(f"[{self.device_id}] Aucun log de réassemblage trouvé.")
+
+        if not success:
             self.logger.error("Le réassemblage a échoué.")
             return False
 

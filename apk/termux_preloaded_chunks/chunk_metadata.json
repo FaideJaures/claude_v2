@@ -1,0 +1,17 @@
+{
+  "original_file": "apk\\termux_preloaded.tar",
+  "original_size": 64921600,
+  "original_md5": "d5064dc8f4f143090d40301730d6cae0",
+  "chunk_folder": "apk\\termux_preloaded_chunks",
+  "chunk_size": 104857600,
+  "num_chunks": 1,
+  "chunks": [
+    {
+      "index": 0,
+      "filename": "chunk_0000.bin",
+      "size": 64921600,
+      "md5": "d5064dc8f4f143090d40301730d6cae0"
+    }
+  ],
+  "persistent_source": "C:\\Users\\hp\\Desktop\\claude_v2\\apk\\termux_preloaded_chunks"
+}

@@ -1,13 +1,24 @@
 # claude_v2/src/utils/adb.py
 import subprocess
 import shlex
+import os
+from typing import Dict, List, Optional
+
+# Import tools manager for bundled ADB
+from utils.tools_manager import get_tools_manager
+
 
 class Adb:
     def __init__(self, logger):
         self.logger = logger
+        self._tools_manager = get_tools_manager()
 
     def run_command(self, command, device_id=None):
-        adb_path = "adb"
+        # Use bundled ADB if available, otherwise fall back to system PATH
+        adb_path = self._tools_manager.get_adb_path()
+        
+        # Get environment with proper PATH for DLL resolution
+        env = self._tools_manager.get_environment_for_tool("adb")
         
         if device_id:
             command_list = [adb_path, "-s", device_id] + shlex.split(command)
@@ -31,7 +42,8 @@ class Adb:
                 encoding='utf-8',
                 errors='replace',
                 startupinfo=startupinfo,
-                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0,
+                env=env  # Use modified environment for bundled tool DLL resolution
             )
             
             output_lines = []
@@ -58,13 +70,32 @@ class Adb:
             return None
 
     def check_adb(self):
+        """
+        Check if ADB is available and report whether bundled or system version is used.
+        """
         self.logger.info("Vérification de l'installation d'ADB...")
+        
+        # Report which ADB is being used
+        if self._tools_manager.is_tool_bundled("adb"):
+            adb_path = self._tools_manager.get_adb_path()
+            self.logger.info(f"Utilisation d'ADB intégré: {adb_path}")
+            
+            # Verify DLL dependencies
+            deps_ok, missing = self._tools_manager.verify_adb_dependencies()
+            if not deps_ok:
+                self.logger.warning(f"DLLs manquantes: {', '.join(missing)}")
+        else:
+            self.logger.info("Utilisation d'ADB système (PATH)")
+        
         output = self.run_command("version")
-        if output and "Android Debug Bridge version" in output[0]:
-            self.logger.success("ADB est installé.")
+        if output and len(output) > 0 and "Android Debug Bridge version" in output[0]:
+            self.logger.success("ADB est installé et fonctionnel.")
             return True
         else:
-            self.logger.error("ADB n'est pas installé ou n'est pas dans le PATH.")
+            if self._tools_manager.is_tool_bundled("adb"):
+                self.logger.error("ADB intégré trouvé mais ne fonctionne pas. Vérifiez les DLLs.")
+            else:
+                self.logger.error("ADB n'est pas installé ou n'est pas dans le PATH.")
             return False
             
     def get_devices(self):
@@ -75,7 +106,7 @@ class Adb:
         detailed = self.get_devices_detailed()
         return [d["id"] for d in detailed]
 
-    def get_devices_detailed(self) -> list[dict]:
+    def get_devices_detailed(self) -> List[Dict]:
         """
         Get connected devices with detailed info including connection type.
 
@@ -115,17 +146,40 @@ class Adb:
                         model = part.replace("model:", "").replace("_", " ")
                         break
                 
-                display_name = f"{icon} {device_id} ({model})"
+                # Get Bluetooth name (do this quietly without logging)
+                bt_result = self.run_command("shell settings get secure bluetooth_name", device_id)
+                bluetooth_name = "Unknown"
+                if bt_result and bt_result[0] and bt_result[0].strip() != "null":
+                    bluetooth_name = bt_result[0].strip()
+
+                display_name = f"{icon} {device_id} ({model} - {bluetooth_name})"
 
                 devices.append({
                     "id": device_id,
                     "type": conn_type,
                     "display_name": display_name,
                     "model": model,
+                    "bluetooth_name": bluetooth_name,
                     "raw_line": line
                 })
 
         return devices
+
+    def get_bluetooth_name(self, device_id: str) -> str:
+        """
+        Get the Bluetooth name of a device.
+        This is the user-friendly name shown in Bluetooth settings.
+
+        Args:
+            device_id: Device serial or IP:port
+
+        Returns:
+            Bluetooth name or "Unknown" if not found
+        """
+        result = self.run_command("shell settings get secure bluetooth_name", device_id)
+        if result and result[0] and result[0].strip() and result[0].strip() != "null":
+            return result[0].strip()
+        return "Unknown"
 
     def enable_tcpip(self, device_id: str, port: int = 5555) -> bool:
         """
@@ -161,7 +215,7 @@ class Adb:
         result = self.run_command(f"disconnect {ip}:{port}")
         return result is not None
 
-    def get_device_ip(self, device_id: str) -> str | None:
+    def get_device_ip(self, device_id: str) -> Optional[str]:
         """
         Get the IP address of the device (scanning all interfaces).
         Prioritizes wlan, then eth, then others. Excludes localhost.

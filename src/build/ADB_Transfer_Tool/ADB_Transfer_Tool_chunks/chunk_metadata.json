@@ -1,0 +1,17 @@
+{
+  "original_file": "src\\build\\ADB_Transfer_Tool\\ADB_Transfer_Tool.pkg",
+  "original_size": 12120253,
+  "original_md5": "2ac0aefe46e8462474f024f9749e210c",
+  "chunk_folder": "src\\build\\ADB_Transfer_Tool\\ADB_Transfer_Tool_chunks",
+  "chunk_size": 104857600,
+  "num_chunks": 1,
+  "chunks": [
+    {
+      "index": 0,
+      "filename": "chunk_0000.bin",
+      "size": 12120253,
+      "md5": "2ac0aefe46e8462474f024f9749e210c"
+    }
+  ],
+  "persistent_source": "C:\\Users\\hp\\Desktop\\claude_v2\\src\\build\\ADB_Transfer_Tool\\ADB_Transfer_Tool_chunks"
+}

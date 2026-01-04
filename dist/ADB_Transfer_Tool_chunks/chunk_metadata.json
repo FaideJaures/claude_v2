@@ -1,0 +1,17 @@
+{
+  "original_file": "dist\\ADB_Transfer_Tool.exe",
+  "original_size": 12452746,
+  "original_md5": "d50d6bb0f281cdbc3a9016e82927c21b",
+  "chunk_folder": "dist\\ADB_Transfer_Tool_chunks",
+  "chunk_size": 104857600,
+  "num_chunks": 1,
+  "chunks": [
+    {
+      "index": 0,
+      "filename": "chunk_0000.bin",
+      "size": 12452746,
+      "md5": "d50d6bb0f281cdbc3a9016e82927c21b"
+    }
+  ],
+  "persistent_source": "C:\\Users\\hp\\Desktop\\claude_v2\\dist\\ADB_Transfer_Tool_chunks"
+}

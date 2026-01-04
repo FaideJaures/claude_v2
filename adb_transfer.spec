@@ -15,6 +15,7 @@ src_dir = Path('src')
 # Data files to include
 datas = [
     (str(src_dir / 'utils' / 'unified.sh'), 'utils'),  # Shell script for device
+    ('platform-tools', 'platform-tools'),  # Bundled ADB and related tools
 ]
 
 # Hidden imports that PyInstaller might miss

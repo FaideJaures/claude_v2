@@ -1,10 +1,11 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 import json
 import os
 import threading
 import time
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from config import (
     DEFAULT_PARALLEL_PROCESSES,
@@ -27,6 +28,7 @@ from core.transfer import TransferManager
 from utils.adb import Adb
 from utils.apk_installer import ApkInstaller
 from utils.updater import check_and_update_on_startup, AutoUpdater
+from utils.folder_manager import TransferFolderManager
 from ui.modal_dialog import (
     TransferScriptModal,
     TermuxInstallModal,
@@ -44,17 +46,21 @@ class SimpleLogger:
     def __init__(self, log_func):
         self.log_func = log_func
 
+    def _timestamp(self) -> str:
+        """Get current timestamp."""
+        return datetime.now().strftime("[%H:%M:%S]")
+
     def info(self, message):
-        self.log_func(message, "info")
+        self.log_func(f"{self._timestamp()} {message}", "info")
 
     def error(self, message):
-        self.log_func(message, "error")
+        self.log_func(f"{self._timestamp()} {message}", "error")
 
     def success(self, message):
-        self.log_func(message, "success")
+        self.log_func(f"{self._timestamp()} {message}", "success")
     
     def warning(self, message):
-        self.log_func(message, "info")  # Display warnings as info (blue color)
+        self.log_func(f"{self._timestamp()} {message}", "info")  # Display warnings as info (blue color)
 
 class SettingsWindow(tk.Toplevel):
     def __init__(self, master=None, config=None):
@@ -133,6 +139,10 @@ class SettingsWindow(tk.Toplevel):
         # ═══════════════════════════════════════════════════════════════
         section2 = tk.Label(scrollable_frame, text="━━━ Optimisations ━━━", font=("Arial", 11, "bold"), fg="#4CAF50")
         section2.pack(pady=(20, 10))
+
+        # Use Transfer Folder
+        self.use_transfer_folder = tk.BooleanVar(value=self.config.get("use_transfer_folder", False))
+        tk.Checkbutton(scrollable_frame, text="Utiliser dossier de transfert factorisé (_for_transfer)", variable=self.use_transfer_folder).pack(anchor="w", padx=20, pady=3)
 
         # Resume transfer
         self.resume_transfer = tk.BooleanVar(value=self.config.get("resume_transfer", True))
@@ -260,6 +270,7 @@ class SettingsWindow(tk.Toplevel):
         self.config["aggressive_temp_cleanup"] = self.aggressive_temp_cleanup.get()
         self.config["auto_detect_permission"] = self.auto_detect_permission.get()
         self.config["reassembly_timeout"] = self.reassembly_timeout.get()
+        self.config["use_transfer_folder"] = self.use_transfer_folder.get()
         # New optimization settings
         self.config["use_adb_shell_mode"] = self.use_adb_shell_mode.get()
         self.config["resume_transfer"] = self.resume_transfer.get()
@@ -284,6 +295,10 @@ class Application(tk.Frame):
         self.pack(fill=tk.BOTH, expand=True)
         
         self.config = self.load_config()
+        
+        # Ask for process name on startup
+        self.current_process_name = self._ask_process_name()
+
         self.create_widgets()
         self.logger = SimpleLogger(self.log)
         
@@ -298,6 +313,7 @@ class Application(tk.Frame):
 
         self.adb = Adb(self.logger)
         self.transfer_manager = TransferManager(self.config, self.logger)
+        self.folder_manager = TransferFolderManager(self.logger)
 
         # Setup modal callback for reassembly
         self.transfer_manager.modal_callback = self.show_reassembly_modal
@@ -491,6 +507,18 @@ class Application(tk.Frame):
         source_button = tk.Button(source_frame, text="Parcourir...", command=self.browse_source)
         source_button.pack(side=tk.LEFT, padx=5, pady=5)
 
+        # Transfer Folder Management
+        folder_mgmt_frame = tk.Frame(self)
+        folder_mgmt_frame.pack(pady=2, padx=10, fill=tk.X)
+        
+        create_tf_btn = tk.Button(folder_mgmt_frame, text="Créer Dossier Transfert", 
+                                 command=self.create_transfer_folder_action, bg="#E0F7FA")
+        create_tf_btn.pack(side=tk.LEFT, padx=5)
+        
+        delete_tf_btn = tk.Button(folder_mgmt_frame, text="Supprimer Dossier Transfert", 
+                                 command=self.delete_transfer_folder_action, bg="#FFEBEE")
+        delete_tf_btn.pack(side=tk.LEFT, padx=5)
+
         # Target directory selection
         target_frame = tk.Frame(self, bd=2, relief=tk.GROOVE)
         target_frame.pack(pady=10, padx=10, fill=tk.X)
@@ -558,7 +586,25 @@ class Application(tk.Frame):
         self.transfer_start_time = None
         self.timer_running = False
 
-        # Progress display
+        # === NEW: Progress bars frame ===
+        progress_bars_frame = tk.Frame(self)
+        progress_bars_frame.pack(pady=5, padx=10, fill=tk.X)
+
+        # Overall progress
+        overall_frame = tk.Frame(progress_bars_frame)
+        overall_frame.pack(fill=tk.X, pady=2)
+        tk.Label(overall_frame, text="Total:", width=15, anchor="w").pack(side=tk.LEFT)
+        self.overall_progress = ttk.Progressbar(overall_frame, mode='determinate', length=300)
+        self.overall_progress.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.overall_progress_label = tk.Label(overall_frame, text="0%", width=8)
+        self.overall_progress_label.pack(side=tk.LEFT)
+
+        # Per-device progress (will be populated dynamically)
+        self.device_progress_frame = tk.Frame(progress_bars_frame)
+        self.device_progress_frame.pack(fill=tk.X, pady=2)
+        self.device_progress_bars = {}  # device_id -> (progressbar, label)
+
+        # Progress display (the log text area)
         progress_frame = tk.Frame(self, bd=2, relief=tk.GROOVE)
         progress_frame.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
 
@@ -632,6 +678,64 @@ class Application(tk.Frame):
     def _start_device_auto_refresh(self):
         """Start background auto-refresh of device list."""
         self._refresh_devices_background()
+
+    def _ask_process_name(self) -> str:
+        """Ask user for the current process/session name."""
+        from tkinter import simpledialog
+
+        # Default to today's date
+        default_name = f"Transfer {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+        process_name = simpledialog.askstring(
+            "Nom du processus",
+            "Entrez un nom pour cette session de transfert:\n"
+            "(Ex: 'Mise à jour entrepôt', 'Déploiement v2.0')",
+            initialvalue=default_name
+        )
+
+        return process_name or default_name
+
+    def _create_device_progress_bars(self, devices: list):
+        """Create progress bars for each device."""
+        # Clear existing
+        for widget in self.device_progress_frame.winfo_children():
+            widget.destroy()
+        self.device_progress_bars = {}
+
+        for device_id in devices:
+            frame = tk.Frame(self.device_progress_frame)
+            frame.pack(fill=tk.X, pady=1)
+
+            # Get short name (bluetooth or last part of ID)
+            details = self.device_details.get(device_id, {})
+            bt_name = details.get("bluetooth_name", details.get("model", device_id[-15:]))
+            label = tk.Label(frame, text=bt_name[:15], width=15, anchor="w")
+            label.pack(side=tk.LEFT)
+
+            progress = ttk.Progressbar(frame, mode='determinate', length=250)
+            progress.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
+            status_label = tk.Label(frame, text="En attente", width=12)
+            status_label.pack(side=tk.LEFT)
+
+            self.device_progress_bars[device_id] = (progress, status_label)
+
+    def _update_device_progress(self, device_id: str, percent: int, status: str = None):
+        """Update a device's progress bar (thread-safe)."""
+        def update():
+            if device_id in self.device_progress_bars:
+                progress, status_label = self.device_progress_bars[device_id]
+                progress['value'] = percent
+                if status:
+                    status_label.config(text=status)
+        self.master.after(0, update)
+
+    def _update_overall_progress(self, percent: int):
+        """Update overall progress bar (thread-safe)."""
+        def update():
+            self.overall_progress['value'] = percent
+            self.overall_progress_label.config(text=f"{percent}%")
+        self.master.after(0, update)
 
     def _refresh_devices_background(self):
         """Refresh device list in background without blocking UI."""
@@ -838,6 +942,34 @@ class Application(tk.Frame):
         directory = filedialog.askdirectory()
         self.source_dir.set(directory)
 
+    def create_transfer_folder_action(self):
+        source = self.source_dir.get()
+        if not source:
+            messagebox.showwarning("Attention", "Veuillez sélectionner un dossier source.")
+            return
+        
+        self.logger.info(f"Création du dossier de transfert pour: {source}")
+        if self.folder_manager.create_transfer_folder(source):
+            messagebox.showinfo("Succès", "Dossier de transfert créé.")
+        else:
+            messagebox.showerror("Erreur", "Impossible de créer le dossier de transfert (voir logs).")
+
+    def delete_transfer_folder_action(self):
+        source = self.source_dir.get()
+        if not source:
+            messagebox.showwarning("Attention", "Veuillez sélectionner un dossier source.")
+            return
+
+        if self.folder_manager.exists(source):
+            if messagebox.askyesno("Confirmation", "Voulez-vous vraiment supprimer le dossier de transfert ?"):
+                self.logger.info(f"Suppression du dossier de transfert pour: {source}")
+                if self.folder_manager.delete_transfer_folder(source):
+                    messagebox.showinfo("Succès", "Dossier de transfert supprimé.")
+                else:
+                    messagebox.showerror("Erreur", "Impossible de supprimer le dossier (voir logs).")
+        else:
+            messagebox.showinfo("Info", "Aucun dossier de transfert trouvé.")
+
     def start_transfer_thread(self):
         source = self.source_dir.get()
         target = self.target_dir.get()
@@ -850,6 +982,22 @@ class Application(tk.Frame):
         if not devices:
             messagebox.showerror("Erreur", "Veuillez sélectionner au moins un appareil.")
             return
+            
+        # Handle Transfer Folder Logic
+        if self.config.get("use_transfer_folder", False):
+            transfer_folder = self.folder_manager.get_transfer_folder_path(source)
+            if not transfer_folder.exists():
+                # Ask user if they want to create it
+                if messagebox.askyesno("Dossier Transfert Manquant", 
+                                      f"Le dossier de transfert n'existe pas:\n{transfer_folder}\n\nVoulez-vous le créer maintenant ?"):
+                    if not self.folder_manager.create_transfer_folder(source):
+                        return # Error already shown/logged
+                else:
+                    return # User cancelled
+            
+            # Use the transfer folder as the actual source
+            self.logger.info(f"Utilisation du dossier de transfert: {transfer_folder}")
+            source = str(transfer_folder)
 
         self.save_config()
 
@@ -884,6 +1032,17 @@ class Application(tk.Frame):
         # Reset cancel flag
         with self.cancel_lock:
             self.cancel_requested = False
+
+        # Initialize progress tracking
+        total_devices = len(devices)
+        completed_devices = 0
+        self._create_device_progress_bars(devices)
+        self._update_overall_progress(0)
+
+        # Track phase timestamps
+        phase_timestamps = {
+            "transfer_start": datetime.now().isoformat()
+        }
 
         # Start timer
         self.transfer_start_time = time.time()
@@ -920,11 +1079,13 @@ class Application(tk.Frame):
 
                 # Phase 1: Transfer to all devices in parallel
                 self.logger.info("\nPHASE 1: Transfert parallèle vers tous les appareils...")
+                phase_timestamps["phase1_start"] = datetime.now().isoformat()
 
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor(max_workers=len(devices)) as executor:
                     futures = {}
                     for device_id in devices:
+                        self._update_device_progress(device_id, 0, "Transfert...")
                         future = executor.submit(self._transfer_to_single_device, device_id, temp_dir)
                         futures[future] = device_id
 
@@ -939,14 +1100,23 @@ class Application(tk.Frame):
                             }
                             if success:
                                 self.logger.success(f"[{device_id}] Transfert terminé avec succès.")
+                                self._update_device_progress(device_id, 100, "Push OK")
                             else:
                                 self.logger.error(f"[{device_id}] Transfert échoué.")
+                                self._update_device_progress(device_id, 0, "Échoué")
                         except Exception as e:
                             self.logger.error(f"[{device_id}] Erreur lors du transfert: {e}")
                             transfer_results[device_id] = {
                                 'transfer_success': False,
                                 'reassembly_success': False
                             }
+                            self._update_device_progress(device_id, 0, "Erreur")
+                        
+                        completed_devices += 1
+                        progress_percent = int((completed_devices / total_devices) * 50)  # Phase 1 = 0-50%
+                        self._update_overall_progress(progress_percent)
+
+                phase_timestamps["phase1_end"] = datetime.now().isoformat()
 
             # Get list of devices that succeeded transfer
             successful_devices = [d for d in devices if transfer_results[d]['transfer_success']]
@@ -965,11 +1135,24 @@ class Application(tk.Frame):
 
             # Phase 2: Reassemble on ALL devices in PARALLEL with synchronized modals
             self.logger.info(f"\nPHASE 2: Réassemblage parallèle sur {len(successful_devices)} appareil(s)...")
+            phase_timestamps["phase2_start"] = datetime.now().isoformat()
+            
+            for device_id in successful_devices:
+                self._update_device_progress(device_id, 50, "Réassemblage...")
 
             try:
                 success = self._parallel_reassembly_on_all_devices(source, target, successful_devices, transfer_results)
             except Exception as e:
                 self.logger.error(f"Erreur lors du réassemblage parallèle: {e}")
+
+            phase_timestamps["phase2_end"] = datetime.now().isoformat()
+            self._update_overall_progress(100)
+            
+            for device_id in successful_devices:
+                if transfer_results[device_id]['reassembly_success']:
+                    self._update_device_progress(device_id, 100, "Terminé")
+                else:
+                    self._update_device_progress(device_id, 100, "Échoué (R)")
 
             # Phase 3: Show summary
             self.logger.info("\n===== RÉSUMÉ FINAL =====")
@@ -989,6 +1172,27 @@ class Application(tk.Frame):
                     self.logger.error(f"  ✗ {device_id}: Transfert échoué")
 
             self.logger.info("=" * 50)
+            
+            # Save transfer records to history
+            from core.history_manager import HistoryManager, TransferRecord
+            history = HistoryManager()
+            elapsed = time.time() - self.transfer_start_time
+
+            for device_id, result in transfer_results.items():
+                bt_name = self.device_details.get(device_id, {}).get("bluetooth_name", "Unknown")
+                record = TransferRecord(
+                    process_name=self.current_process_name,
+                    device_id=device_id,
+                    device_bluetooth_name=bt_name,
+                    status="completed" if result['reassembly_success'] else "failed",
+                    files_count=len(self.transfer_manager.manifests) + len(self.transfer_manager.files_to_batch),
+                    bytes_transferred=0,  # TODO: track actual bytes
+                    duration_seconds=elapsed,
+                    started_at=phase_timestamps["transfer_start"],
+                    completed_at=datetime.now().isoformat(),
+                    phases=phase_timestamps
+                )
+                history.add_record(record)
             
         except Exception as e:
             self.logger.error(f"Erreur critique lors du transfert: {e}")
@@ -1690,8 +1894,20 @@ class Application(tk.Frame):
                 self.transfer_manager.reassembly_manager.cancel()
 
     def log(self, message, tag="info"):
+        # Check if we are currently at the bottom (within 1% of end)
+        try:
+            # yview() returns (start_fraction, end_fraction)
+            # If end_fraction is 1.0, we are at the bottom
+            _, end_fraction = self.progress_text.yview()
+            at_bottom = end_fraction >= 0.99
+        except Exception:
+            at_bottom = True
+
         self.progress_text.insert(tk.END, str(message) + "\n", tag)
-        self.progress_text.see(tk.END)
+        
+        # Only auto-scroll if we were already at the bottom
+        if at_bottom:
+            self.progress_text.see(tk.END)
 
 def main():
     root = tk.Tk()
