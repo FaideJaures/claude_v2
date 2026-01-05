@@ -2,6 +2,7 @@
 import subprocess
 import shlex
 import os
+import threading
 from typing import Dict, List, Optional
 
 # Import tools manager for bundled ADB
@@ -12,6 +13,8 @@ class Adb:
     def __init__(self, logger):
         self.logger = logger
         self._tools_manager = get_tools_manager()
+        self._active_processes = set()
+        self._processes_lock = threading.Lock()
 
     def run_command(self, command, device_id=None):
         # Use bundled ADB if available, otherwise fall back to system PATH
@@ -49,15 +52,23 @@ class Adb:
                 env=env  # Use modified environment for bundled tool DLL resolution
             )
             
-            output_lines = []
-            while True:
-                output = process.stdout.readline()
-                if output == '' and process.poll() is not None:
-                    break
-                if output:
-                    output_lines.append(output.strip())
+            with self._processes_lock:
+                self._active_processes.add(process)
 
-            rc = process.poll()
+            try:
+                output_lines = []
+                while True:
+                    output = process.stdout.readline()
+                    if output == '' and process.poll() is not None:
+                        break
+                    if output:
+                        output_lines.append(output.strip())
+
+                rc = process.poll()
+            finally:
+                with self._processes_lock:
+                    self._active_processes.discard(process)
+
             if rc != 0:
                 # Only log errors (not every failed command - some are expected like stat on missing files)
                 if getattr(self.logger, 'verbose', False):
@@ -70,8 +81,28 @@ class Adb:
             self.logger.error("Erreur: L'exécutable 'adb' est introuvable. Veuillez l'installer et l'ajouter à votre PATH.")
             return None
         except Exception as e:
+            # If we're cancelling, an error is expected
+            if getattr(self, '_cancelling', False):
+                return None
             self.logger.error(f"Une erreur inattendue est survenue: {e}")
             return None
+
+    def terminate_all(self):
+        """Terminate all active ADB processes."""
+        self._cancelling = True
+        with self._processes_lock:
+            for process in self._active_processes:
+                try:
+                    process.terminate()
+                    # Wait briefly for termination
+                    # process.wait(timeout=0.5)
+                except Exception:
+                    try:
+                        process.kill()
+                    except:
+                        pass
+            self._active_processes.clear()
+        self._cancelling = False
 
     def check_adb(self):
         """

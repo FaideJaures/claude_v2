@@ -1,12 +1,14 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, ttk, simpledialog
 import json
 import os
 import threading
 import time
 import tempfile
+import queue
 from datetime import datetime
 from pathlib import Path
+from core.subsidiary import SubsidiaryFolder
 from config import (
     DEFAULT_PARALLEL_PROCESSES,
     DEFAULT_CHUNK_SIZE,
@@ -23,6 +25,13 @@ from config import (
     DEFAULT_BUNDLE_SIZE,
     DEFAULT_REFRESH_INTERVAL,
     DEFAULT_AUTO_CONNECT_WIFI,
+    DEFAULT_CHUNKING_WORKERS,
+    DEFAULT_ZIPPING_WORKERS,
+    DEFAULT_REASSEMBLY_WORKERS,
+    DEFAULT_UNZIP_WORKERS,
+    DEFAULT_FINAL_MOVE_WORKERS,
+    DEFAULT_SMALL_FILE_MODE,
+    DEFAULT_PRE_APK_ENABLED,
 )
 from core.transfer import TransferManager
 from utils.adb import Adb
@@ -39,7 +48,8 @@ from ui.modal_dialog import (
     CommandExecutionModal,
     ReassemblyProgressModal,
     FinalMoveModal,
-    CompletionModal
+    CompletionModal,
+    PreApkConfirmationModal,
 )
 
 class SimpleLogger:
@@ -316,6 +326,10 @@ class Application(tk.Frame):
         self.transfer_manager = TransferManager(self.config, self.logger)
         self.folder_manager = TransferFolderManager(self.logger)
 
+        # Setup log queue for batched updates
+        self.log_queue = queue.Queue()
+        self._process_log_queue()
+
         # Setup modal callback for reassembly
         self.transfer_manager.modal_callback = self.show_reassembly_modal
         self.current_modal = None
@@ -520,6 +534,18 @@ class Application(tk.Frame):
                                  command=self.delete_transfer_folder_action, bg="#FFEBEE")
         delete_tf_btn.pack(side=tk.LEFT, padx=5)
 
+        # Folder statistics label
+        self.folder_stats_label = tk.Label(
+            self,
+            text="Sélectionnez un dossier source",
+            fg="gray",
+            font=("Arial", 9)
+        )
+        self.folder_stats_label.pack(pady=2, padx=10, anchor="w")
+        
+        # Trace source directory changes
+        self.source_dir.trace_add("write", self._on_source_changed)
+
         # Target directory selection
         target_frame = tk.Frame(self, bd=2, relief=tk.GROOVE)
         target_frame.pack(pady=10, padx=10, fill=tk.X)
@@ -529,6 +555,37 @@ class Application(tk.Frame):
 
         target_entry = tk.Entry(target_frame, textvariable=self.target_dir, width=50)
         target_entry.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5, pady=5)
+
+        # Subsidiary folders panel
+        subsidiary_frame = tk.LabelFrame(self, text="Dossiers subsidiaires (optionnel)", padx=5, pady=5)
+        subsidiary_frame.pack(pady=5, padx=10, fill=tk.X)
+        
+        # Listbox for subsidiaries
+        list_frame = tk.Frame(subsidiary_frame)
+        list_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        scrollbar = tk.Scrollbar(list_frame, orient=tk.VERTICAL)
+        self.subsidiary_listbox = tk.Listbox(
+            list_frame, 
+            height=3, 
+            width=50,
+            yscrollcommand=scrollbar.set,
+            font=("Arial", 9)
+        )
+        scrollbar.config(command=self.subsidiary_listbox.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.subsidiary_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Buttons for subsidiary management
+        btn_frame = tk.Frame(subsidiary_frame)
+        btn_frame.pack(side=tk.RIGHT, padx=5)
+        
+        tk.Button(btn_frame, text="+ Ajouter", command=self._add_subsidiary, bg="#E8F5E9").pack(pady=2, fill=tk.X)
+        tk.Button(btn_frame, text="- Supprimer", command=self._remove_subsidiary, bg="#FFEBEE").pack(pady=2, fill=tk.X)
+        tk.Button(btn_frame, text="📦 Préparer", command=self._prepare_subsidiary, bg="#E3F2FD").pack(pady=2, fill=tk.X)
+        
+        # Initialize subsidiaries list
+        self.subsidiaries = []
 
         # Transfer button
         self.transfer_button = tk.Button(self, text="Démarrer le Transfert", command=self.start_transfer_thread)
@@ -943,6 +1000,128 @@ class Application(tk.Frame):
         directory = filedialog.askdirectory()
         self.source_dir.set(directory)
 
+    def _on_source_changed(self, *args):
+        """Update folder stats when source directory changes."""
+        source = self.source_dir.get()
+        if source and Path(source).exists():
+            self.folder_stats_label.config(text="Analyse en cours...", fg="gray")
+            threading.Thread(
+                target=self._analyze_and_display_stats,
+                args=(source,),
+                daemon=True
+            ).start()
+        else:
+            self.folder_stats_label.config(
+                text="Sélectionnez un dossier source",
+                fg="gray"
+            )
+
+    def _analyze_and_display_stats(self, source: str):
+        """Analyze folder and update stats label (background thread)."""
+        try:
+            stats = self.transfer_manager.analyze_folder(source)
+            size_str = self._format_size(stats["total_size_bytes"])
+            text = (
+                f"📁 {stats['total_files']} fichiers | {size_str} | "
+                f"📦 {stats['large_files_count']} gros ({stats['estimated_chunks']} chunks) | "
+                f"🗂️ {stats['small_files_count']} petits ({stats['estimated_bundles']} bundles)"
+            )
+            # Color-code based on size
+            if stats["total_size_bytes"] >= 10 * 1024**3:  # >10GB
+                color = "#D32F2F"  # Red
+            elif stats["total_size_bytes"] >= 1 * 1024**3:  # >1GB
+                color = "#F57C00"  # Orange
+            else:
+                color = "#388E3C"  # Green
+            
+            self.master.after(0, lambda: self.folder_stats_label.config(text=text, fg=color))
+        except Exception as e:
+            self.master.after(0, lambda: self.folder_stats_label.config(text=f"Erreur: {e}", fg="red"))
+
+    def _format_size(self, size_bytes: int) -> str:
+        """Format bytes to human readable string."""
+        if size_bytes >= 1024 ** 3:
+            return f"{size_bytes / (1024**3):.2f} GB"
+        elif size_bytes >= 1024 ** 2:
+            return f"{size_bytes / (1024**2):.2f} MB"
+        elif size_bytes >= 1024:
+            return f"{size_bytes / 1024:.2f} KB"
+        return f"{size_bytes} B"
+
+    def _add_subsidiary(self):
+        """Open dialog to add a subsidiary folder."""
+        folder = filedialog.askdirectory(title="Sélectionner dossier subsidiaire")
+        if not folder:
+            return
+        
+        injection = simpledialog.askstring(
+            "Chemin d'injection",
+            "Où placer ce dossier dans la cible?\n(vide = racine, fusion directe)",
+            initialvalue=""
+        )
+        if injection is None:  # User cancelled
+            return
+        
+        sub = SubsidiaryFolder(folder, injection.strip())
+        self.subsidiaries.append(sub)
+        self._refresh_subsidiary_list()
+        self.logger.info(f"Subsidiaire ajouté: {sub.name} → {injection or '(racine)'}")
+
+    def _remove_subsidiary(self):
+        """Remove selected subsidiary from list."""
+        selection = self.subsidiary_listbox.curselection()
+        if not selection:
+            messagebox.showinfo("Info", "Sélectionnez un subsidiaire à supprimer.")
+            return
+        
+        idx = selection[0]
+        removed = self.subsidiaries.pop(idx)
+        self._refresh_subsidiary_list()
+        self.logger.info(f"Subsidiaire supprimé: {removed.name}")
+
+    def _prepare_subsidiary(self):
+        """Create _for_transfer for selected subsidiary."""
+        selection = self.subsidiary_listbox.curselection()
+        if not selection:
+            messagebox.showinfo("Info", "Sélectionnez un subsidiaire à préparer.")
+            return
+        
+        idx = selection[0]
+        sub = self.subsidiaries[idx]
+        
+        if sub.has_prepared:
+            if not messagebox.askyesno("Confirmation", 
+                f"Le dossier _for_transfer existe déjà pour {sub.name}.\nVoulez-vous le recréer?"):
+                return
+        
+        # Disable UI during preparation
+        self.transfer_button.config(state=tk.DISABLED)
+        
+        def run_prepare():
+            try:
+                self.logger.info(f"Préparation de {sub.name}...")
+                success = self.transfer_manager.prepare_transfer(
+                    sub.source_path, 
+                    str(sub.prepared_folder)
+                )
+                if success:
+                    self.logger.success(f"Subsidiaire {sub.name} préparé avec succès")
+                    self.master.after(0, self._refresh_subsidiary_list)
+                else:
+                    self.logger.error(f"Échec de la préparation de {sub.name}")
+            except Exception as e:
+                self.logger.error(f"Erreur: {e}")
+            finally:
+                self.master.after(0, lambda: self.transfer_button.config(state=tk.NORMAL))
+        
+        threading.Thread(target=run_prepare, daemon=True).start()
+
+    def _refresh_subsidiary_list(self):
+        """Update the subsidiary listbox display."""
+        self.subsidiary_listbox.delete(0, tk.END)
+        for sub in self.subsidiaries:
+            self.subsidiary_listbox.insert(tk.END, sub.get_display())
+
     def create_transfer_folder_action(self):
         source = self.source_dir.get()
         if not source:
@@ -1036,17 +1215,45 @@ class Application(tk.Frame):
                     # Use specialized transfer method
                     success = self.transfer_manager.transfer_from_prepared_folder(transfer_folder, target, device_id)
                 else:
-                    # Standard transfer
+                    # Standard transfer - now uses parallel workers
                     if len(devices) == 1:
                         self._update_device_progress(device_id, 10, "Préparation...")
                         self._update_overall_progress(10)
-                        success = self.transfer_manager.start_transfer(source, target, device_id)
+                        success = self.transfer_manager.start_transfer_parallel(source, target, device_id)
                     else:
                         self.run_multi_device_transfer(source, target, devices)
                         return  # Multi-device handles its own cleanup
                 
                 # Update progress on completion
                 if success:
+                    self._update_device_progress(device_id, 80, "Principal OK ✓")
+                    self._update_overall_progress(80)
+                    
+                    # Process subsidiary folders if any
+                    if self.subsidiaries:
+                        self.logger.info(f"=== Transfert de {len(self.subsidiaries)} subsidiaire(s) ===")
+                        for i, sub in enumerate(self.subsidiaries):
+                            sub_target = f"{target}/{sub.injection_path}".replace("//", "/").rstrip("/")
+                            self.logger.info(f"[{i+1}/{len(self.subsidiaries)}] {sub.name} → {sub.injection_path or '(racine)'}")
+                            self._update_device_progress(device_id, 80 + int((i / len(self.subsidiaries)) * 20), f"Sub: {sub.name}")
+                            
+                            try:
+                                if sub.has_prepared:
+                                    self.logger.info(f"  Utilisation de {sub.name}_for_transfer")
+                                    self.transfer_manager.transfer_from_prepared_folder(
+                                        str(sub.prepared_folder), sub_target, device_id
+                                    )
+                                else:
+                                    self.logger.info(f"  Préparation à la volée de {sub.name}")
+                                    self.transfer_manager.start_transfer_parallel(
+                                        sub.source_path, sub_target, device_id
+                                    )
+                                self.logger.success(f"  {sub.name} transféré avec succès")
+                            except Exception as e:
+                                self.logger.error(f"  Erreur subsidiaire {sub.name}: {e}")
+                        
+                        self.logger.info("=== Tous les subsidiaires transférés ===")
+                    
                     self._update_device_progress(device_id, 100, "Terminé ✓")
                     self._update_overall_progress(100)
                 else:
@@ -1277,8 +1484,14 @@ class Application(tk.Frame):
         
         self._cleanup_transfer_ui(success_count=success_count, total_count=total_count)
             
-    def _cleanup_transfer_ui(self, success_count=None, total_count=None):
-        """Reset UI state after transfer ends."""
+    def _cleanup_transfer_ui(self, success_count=None, total_count=None, stats=None):
+        """Reset UI state after transfer ends.
+        
+        Args:
+            success_count: Number of successful device transfers
+            total_count: Total number of devices
+            stats: Optional TransferStats object with detailed metrics
+        """
         # Stop timer
         self.timer_running = False
         elapsed = 0
@@ -1298,25 +1511,29 @@ class Application(tk.Frame):
         
         # Show completion notification
         if success_count is not None and total_count is not None:
-            duration_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
+            # Build stats message
+            if stats:
+                stats_msg = stats.format_summary()
+            else:
+                duration_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
+                stats_msg = f"Durée: {duration_str}"
+            
             if success_count == total_count:
                 self.master.after(0, lambda: messagebox.showinfo(
                     "Transfert Terminé ✓",
-                    f"Transfert réussi sur {success_count}/{total_count} appareil(s).\n\n"
-                    f"Durée: {duration_str}"
+                    f"Transfert réussi sur {success_count}/{total_count} appareil(s).\n\n{stats_msg}"
                 ))
             elif success_count > 0:
                 self.master.after(0, lambda: messagebox.showwarning(
                     "Transfert Partiel",
                     f"Transfert réussi sur {success_count}/{total_count} appareil(s).\n"
-                    f"Échec sur {total_count - success_count} appareil(s).\n\n"
-                    f"Durée: {duration_str}\n\nConsultez les logs pour plus de détails."
+                    f"Échec sur {total_count - success_count} appareil(s).\n\n{stats_msg}\n\nConsultez les logs pour plus de détails."
                 ))
             else:
                 self.master.after(0, lambda: messagebox.showerror(
                     "Transfert Échoué",
                     f"Échec du transfert sur tous les appareils ({total_count}).\n\n"
-                    f"Durée: {duration_str}\n\nConsultez les logs pour plus de détails."
+                    f"Durée: {int(elapsed//60)}m {int(elapsed%60)}s\n\nConsultez les logs pour plus de détails."
                 ))
 
     def _cancel_current_operation(self):
@@ -1910,7 +2127,27 @@ class Application(tk.Frame):
         self.modal_result = None
 
         # Create appropriate modal
-        if modal_type == "transfer_script":
+        if modal_type == "pre_apk_confirmation":
+            app_name = kwargs.get("app_name", "Application")
+            self.modal_result = False
+            
+            def on_done():
+                self.modal_result = True
+            
+            def on_cancel():
+                self.modal_result = False
+            
+            self.current_modal = PreApkConfirmationModal(
+                self, 
+                app_name=app_name, 
+                device_id=device_id, 
+                on_done=on_done,
+                on_cancel=on_cancel
+            )
+            self.wait_window(self.current_modal)
+            return self.modal_result
+
+        elif modal_type == "transfer_script":
             self.current_modal = TransferScriptModal(self, device_id=device_id, on_cancel=self._on_modal_cancel)
             self.wait_window(self.current_modal)  # Wait for user to click "Continuer"
 
@@ -1996,31 +2233,47 @@ class Application(tk.Frame):
                 self.transfer_manager.reassembly_manager.cancel()
 
     def log(self, message, tag="info"):
-        # Check if we are currently at the bottom (within 1% of end)
-        try:
-            # yview() returns (start_fraction, end_fraction)
-            # If end_fraction is 1.0, we are at the bottom
-            _, end_fraction = self.progress_text.yview()
-            at_bottom = end_fraction >= 0.99
-        except Exception:
-            at_bottom = True
+        """Put log message into queue for batched UI update."""
+        self.log_queue.put((message, tag))
 
-        self.progress_text.insert(tk.END, str(message) + "\n", tag)
-        
-        # Limit log to 5000 lines to prevent memory leak
+    def _process_log_queue(self):
+        """Periodically process the log queue and update the Text widget in batches."""
         try:
-            # check number of lines
-            line_count = int(self.progress_text.index('end-1c').split('.')[0])
-            if line_count > 5000:
-                # delete lines from top to keep it at 5000
-                lines_to_delete = line_count - 5000
-                self.progress_text.delete("1.0", f"{lines_to_delete + 1}.0")
-        except Exception:
-            pass
-        
-        # Only auto-scroll if we were already at the bottom
-        if at_bottom:
-            self.progress_text.see(tk.END)
+            # Process up to 100 messages at once to keep UI responsive
+            messages_processed = 0
+            
+            # Check if we are currently at the bottom (within 1% of end)
+            try:
+                _, end_fraction = self.progress_text.yview()
+                at_bottom = end_fraction >= 0.99
+            except:
+                at_bottom = True
+
+            while messages_processed < 100:
+                try:
+                    message, tag = self.log_queue.get_nowait()
+                    self.progress_text.insert(tk.END, str(message) + "\n", tag)
+                    messages_processed += 1
+                except queue.Empty:
+                    break
+            
+            if messages_processed > 0:
+                # Limit log to 5000 lines to prevent memory leak
+                try:
+                    line_count = int(self.progress_text.index('end-1c').split('.')[0])
+                    if line_count > 5000:
+                        lines_to_delete = line_count - 5000
+                        self.progress_text.delete("1.0", f"{lines_to_delete + 1}.0")
+                except:
+                    pass
+                
+                # Only auto-scroll if we were already at the bottom
+                if at_bottom:
+                    self.progress_text.see(tk.END)
+                    
+        finally:
+            # Schedule next update (100ms)
+            self.master.after(100, self._process_log_queue)
 
 def main():
     root = tk.Tk()

@@ -14,6 +14,50 @@ from utils.adb import Adb
 
 from utils.termux import TermuxInstaller
 from core.reassembly import ReassemblyManager
+from core.pre_apk_manager import PreApkManager
+from core.parallel_workers import (
+    WorkerConfig,
+    ParallelChunker,
+    ParallelZipper,
+    ParallelBatchPusher,
+    bin_pack_files,
+)
+from core.device_workers import DeviceWorkerPool
+from dataclasses import dataclass
+
+
+@dataclass
+class TransferStats:
+    """Statistics for a completed transfer."""
+    start_time: float = 0.0
+    end_time: float = 0.0
+    bytes_transferred: int = 0
+    files_count: int = 0
+    chunks_count: int = 0
+    bundles_count: int = 0
+    device_id: str = ""
+
+    @property
+    def duration_seconds(self) -> float:
+        return self.end_time - self.start_time
+
+    @property
+    def speed_mbps(self) -> float:
+        if self.duration_seconds > 0:
+            return (self.bytes_transferred / (1024 * 1024)) / self.duration_seconds
+        return 0.0
+
+    def format_summary(self) -> str:
+        duration = self.duration_seconds
+        minutes = int(duration // 60)
+        seconds = int(duration % 60)
+        size_mb = self.bytes_transferred / (1024 * 1024)
+        return (
+            f"Durée: {minutes}m {seconds}s\n"
+            f"Vitesse: {self.speed_mbps:.2f} MB/s\n"
+            f"Fichiers: {self.files_count}\n"
+            f"Données: {size_mb:.2f} MB"
+        )
 
 
 def _escape_shell_path(path: str) -> str:
@@ -46,11 +90,82 @@ class TransferManager:
         self.progress_callback = None  # For progress updates: callback(percent, status)
         self.is_prepared_folder_transfer = False  # Flag to prevent cleanup of prepared folder
         self.cancelled = False
+        self._worker_config = None  # Cached worker configuration
 
     def cancel(self):
         """Cancel transfer operations."""
         self.cancelled = True
+        self.adb.terminate_all()
         self.logger.info("Transfert annulé par l'utilisateur")
+
+    def get_worker_config(self) -> WorkerConfig:
+        """Get worker configuration from config dict."""
+        if self._worker_config is None:
+            self._worker_config = WorkerConfig(
+                chunking_workers=self.config.get("chunking_workers", 4),
+                zipping_workers=self.config.get("zipping_workers", 10),
+                reassembly_workers=self.config.get("reassembly_workers", 4),
+                unzip_workers=self.config.get("unzip_workers", 10),
+                final_move_workers=self.config.get("final_move_workers", 10),
+                small_file_mode=self.config.get("small_file_mode", "zip"),
+            )
+        return self._worker_config
+
+    def analyze_folder(self, source_dir: str) -> dict:
+        """
+        Analyze a folder without modifying internal state.
+        Returns statistics about what would be transferred.
+        
+        Args:
+            source_dir: Path to the source directory
+            
+        Returns:
+            Dictionary with folder statistics
+        """
+        files_to_chunk = []
+        files_to_batch = []
+        total_size = 0
+
+        small_file_threshold = self.config.get("small_file_threshold", 10 * 1024 * 1024)
+        chunk_size = self.config.get("chunk_size", 100 * 1024 * 1024)
+        bundle_size = self.config.get("bundle_size", 50 * 1024 * 1024)
+
+        source_path = Path(source_dir)
+        for root, dirs, files in os.walk(source_path):
+            # Skip chunk folders
+            dirs[:] = [d for d in dirs if not d.endswith('_chunks')]
+            
+            for file in files:
+                file_path = Path(root) / file
+                try:
+                    size = file_path.stat().st_size
+                    total_size += size
+                    if size > small_file_threshold:
+                        files_to_chunk.append((file_path, size))
+                    else:
+                        files_to_batch.append((file_path, size))
+                except OSError:
+                    pass
+
+        # Estimate chunks (based on chunk_size)
+        estimated_chunks = sum(
+            (size + chunk_size - 1) // chunk_size
+            for _, size in files_to_chunk
+        )
+
+        # Estimate bundles (based on bundle_size)
+        small_total = sum(size for _, size in files_to_batch)
+        estimated_bundles = max(1, (small_total + bundle_size - 1) // bundle_size) if files_to_batch else 0
+
+        return {
+            "total_files": len(files_to_chunk) + len(files_to_batch),
+            "total_size_bytes": total_size,
+            "large_files_count": len(files_to_chunk),
+            "small_files_count": len(files_to_batch),
+            "estimated_chunks": estimated_chunks,
+            "estimated_bundles": estimated_bundles,
+        }
+
 
     def start_transfer(self, source_dir, target_dir, device_id):
         total_start_time = time.time()
@@ -108,6 +223,109 @@ class TransferManager:
 
         total_time = time.time() - total_start_time
         self.logger.success(f"Transfert terminé avec succès en {total_time:.2f} secondes !")
+        return True
+
+    def start_transfer_parallel(self, source_dir, target_dir, device_id):
+        """
+        Start transfer with full multi-worker parallel processing.
+        
+        This is the new recommended transfer method that uses:
+        - Pre-APK installation and confirmation
+        - Parallel chunking with ProcessPoolExecutor
+        - Parallel zipping (or batch push) with ProcessPoolExecutor  
+        - Parallel device-side operations with multiple ADB sessions
+        
+        Args:
+            source_dir: Source directory path
+            target_dir: Target directory path on device
+            device_id: Device identifier
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        total_start_time = time.time()
+        self.logger.info(f"=== Transfert parallèle vers {device_id} ===")
+        self.logger.info(f"Source: {source_dir}")
+        self.logger.info(f"Destination: {target_dir}")
+        
+        worker_config = self.get_worker_config()
+        self.logger.info(f"Workers: chunking={worker_config.chunking_workers}, "
+                        f"zipping={worker_config.zipping_workers}, "
+                        f"reassembly={worker_config.reassembly_workers}")
+        
+        # === 0. PRE-APK FLOW ===
+        if self.config.get("pre_apk_enabled", True):
+            self.logger.info("Phase 0: Pré-APK...")
+            pre_apk_mgr = PreApkManager(
+                self.adb, 
+                self.logger, 
+                self.config,
+                modal_callback=self.modal_callback
+            )
+            if not pre_apk_mgr.run_pre_transfer(device_id):
+                self.logger.error("Pré-APK flow annulé ou échoué")
+                return False
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.temp_dir = Path(temp_dir)
+            self.logger.info(f"Dossier temporaire: {self.temp_dir}")
+            
+            # === 1. SCAN FILES ===
+            phase_start = time.time()
+            self.logger.info("Phase 1: Analyse des fichiers...")
+            self.scan_files(source_dir)
+            self.logger.info(f"  {len(self.files_to_chunk)} grands fichiers (chunking)")
+            self.logger.info(f"  {len(self.files_to_batch)} petits fichiers (bundling)")
+            self.logger.info(f"  Durée: {time.time() - phase_start:.2f}s")
+            
+            # === 2. PARALLEL PROCESSING (CHUNKING + ZIPPING) ===
+            phase_start = time.time()
+            self.logger.info("Phase 2: Traitement parallèle...")
+            self.process_files_parallel(Path(source_dir), device_id=device_id)
+            self.logger.info(f"  Durée: {time.time() - phase_start:.2f}s")
+            
+            # Check cancellation
+            if self.cancelled:
+                self.logger.info("Transfert annulé")
+                return False
+            
+            # === 3. TRANSFER TO DEVICE ===  
+            phase_start = time.time()
+            self.logger.info("Phase 3: Transfert vers l'appareil...")
+            remote_temp_dir = self.config.get("remote_temp_dir", "/sdcard/transfer_temp")
+            stats = self.parallel_transfer(remote_temp_dir, device_id)
+            
+            if stats is None:
+                self.logger.error("Transfert échoué")
+                return False
+            
+            self.logger.info(f"  Durée: {time.time() - phase_start:.2f}s")
+            
+            # === 4. PARALLEL DEVICE-SIDE OPERATIONS ===
+            phase_start = time.time()
+            self.logger.info("Phase 4: Réassemblage parallèle sur l'appareil...")
+            
+            device_pool = DeviceWorkerPool(
+                self.adb,
+                device_id,
+                self.logger,
+                self.config
+            )
+            
+            success = device_pool.run_full_reassembly_flow(
+                manifests=self.manifests,
+                remote_temp_dir=remote_temp_dir,
+                target_dir=target_dir
+            )
+            
+            if not success:
+                self.logger.error("Réassemblage parallèle échoué")
+                return False
+            
+            self.logger.info(f"  Durée: {time.time() - phase_start:.2f}s")
+        
+        total_time = time.time() - total_start_time
+        self.logger.success(f"Transfert parallèle terminé en {total_time:.2f}s !")
         return True
 
     def prepare_transfer(self, source_dir, output_dir):
@@ -367,6 +585,113 @@ class TransferManager:
                 
                 bundle_size_mb = bundle_path.stat().st_size / (1024 * 1024)
                 self.logger.success(f"Bundle {bundle_name}: {bundle_size_mb:.2f} MB ({len(bundle_files)} fichiers)")
+
+    def process_files_parallel(
+        self,
+        source_dir: Path,
+        output_folder: Path = None,
+        use_persistent_chunks: bool = True,
+        device_id: str = None
+    ):
+        """
+        Process files with parallel workers for chunking and zipping.
+        
+        Uses ProcessPoolExecutor for CPU-bound chunking and zipping operations.
+        Falls back to sequential processing for small file counts.
+        
+        Args:
+            source_dir: Source directory path.
+            output_folder: Directory where chunks and bundles will be created.
+            use_persistent_chunks: If True, chunks are created next to source.
+            device_id: Optional device ID for batch push mode.
+        """
+        if output_folder is None:
+            output_folder = self.temp_dir
+        
+        worker_config = self.get_worker_config()
+        
+        self.logger.info(f"Traitement parallèle: {len(self.files_to_chunk)} grands, "
+                        f"{len(self.files_to_batch)} petits fichiers...")
+        
+        # === PARALLEL CHUNKING ===
+        if self.files_to_chunk:
+            # Only use parallel for 2+ files
+            if len(self.files_to_chunk) >= 2:
+                self.logger.info(f"Chunking parallèle avec {worker_config.chunking_workers} workers...")
+                self.manifests = ParallelChunker.chunk_files_parallel(
+                    files=self.files_to_chunk,
+                    source_folder=source_dir,
+                    output_folder=output_folder,
+                    chunk_size=self.config.get("chunk_size", 100 * 1024 * 1024),
+                    workers=worker_config.chunking_workers,
+                    logger=self.logger,
+                    persistent_chunks=use_persistent_chunks
+                )
+            else:
+                # Sequential for single file
+                for file_path in self.files_to_chunk:
+                    manifest = FileChunker.chunk_file(
+                        file_path=file_path,
+                        source_folder=source_dir,
+                        output_folder=output_folder,
+                        chunk_size_bytes=self.config.get("chunk_size", 100 * 1024 * 1024),
+                        progress_callback=self.logger.info,
+                        logger=self.logger,
+                        persistent_chunks=use_persistent_chunks,
+                    )
+                    self.manifests.append(manifest)
+        
+        # === SMALL FILES: ZIP or BATCH PUSH ===
+        if self.files_to_batch:
+            target_bundle_size = self.config.get("bundle_size", 50 * 1024 * 1024)
+            bundles = bin_pack_files(self.files_to_batch, target_bundle_size)
+            
+            if worker_config.small_file_mode == "batch_push" and device_id:
+                # Push files directly without zipping
+                self.logger.info(f"Push direct des {len(self.files_to_batch)} petits fichiers...")
+                remote_temp_dir = self.config.get("remote_temp_dir", "/sdcard/transfer_temp")
+                
+                success, ok, fail = ParallelBatchPusher.push_files_parallel(
+                    files_with_sizes=self.files_to_batch,
+                    source_dir=source_dir,
+                    remote_dir=remote_temp_dir,
+                    device_id=device_id,
+                    adb=self.adb,
+                    workers=worker_config.zipping_workers,
+                    logger=self.logger
+                )
+                
+                if not success:
+                    self.logger.warning(f"Certains fichiers n'ont pas été transférés: {fail} échecs")
+            else:
+                # Create ZIP bundles
+                if len(bundles) >= 2:
+                    # Parallel zipping for multiple bundles
+                    self.logger.info(f"Création parallèle de {len(bundles)} bundle(s) "
+                                    f"avec {worker_config.zipping_workers} workers...")
+                    ParallelZipper.create_bundles_parallel(
+                        bundles=bundles,
+                        source_dir=source_dir,
+                        output_folder=output_folder,
+                        workers=worker_config.zipping_workers,
+                        logger=self.logger
+                    )
+                else:
+                    # Sequential for single bundle
+                    self.logger.info(f"Création de {len(bundles)} bundle(s) ZIP...")
+                    for i, bundle_files in enumerate(bundles):
+                        bundle_name = f"bundle_batch_{i:03d}.zip" if len(bundles) > 1 else "bundle_batch.zip"
+                        bundle_path = output_folder / bundle_name
+                        
+                        with zipfile.ZipFile(bundle_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
+                            for file_path, file_size in bundle_files:
+                                rel_path = file_path.relative_to(source_dir)
+                                zf.write(file_path, arcname=str(rel_path))
+                        
+                        bundle_size_mb = bundle_path.stat().st_size / (1024 * 1024)
+                        self.logger.success(f"Bundle {bundle_name}: {bundle_size_mb:.2f} MB")
+        
+        self.logger.success("Traitement des fichiers terminé")
     
     def _bin_pack_files(self, files_with_sizes, target_size):
         """Pack files into bundles using First Fit Decreasing algorithm.
@@ -401,18 +726,61 @@ class TransferManager:
         
         return bundles
 
+    def _get_remote_file_info_bulk(self, remote_dir: str, device_id: str) -> dict[str, int]:
+        """Get sizes of all files in a remote directory in one call.
+        
+        Returns:
+            Dictionary mapping relative filename (from remote_dir) to size in bytes.
+        """
+        file_info = {}
+        # Use find to get all files and their sizes recursively
+        # format: path:size
+        cmd = f'shell "find \'{_escape_shell_path(remote_dir)}\' -type f -exec stat -c \'%n:%s\' {{}} + 2>/dev/null"'
+        result = self.adb.run_command(cmd, device_id)
+        
+        if result:
+            for line in result:
+                try:
+                    if ':' in line:
+                        # Find the last colon to handle filenames containing colons
+                        path, size_str = line.rsplit(':', 1)
+                        # Get path relative to remote_dir
+                        try:
+                            rel_path = os.path.relpath(path, remote_dir).replace('\\', '/')
+                            file_info[rel_path] = int(size_str)
+                        except Exception:
+                            continue
+                except (ValueError, IndexError):
+                    continue
+        return file_info
+
     def parallel_transfer(self, remote_temp_dir, device_id):
         """Transfer chunks individually with per-device worker pool.
         
         Features:
         - Resume support: skips chunks that already exist with correct size
         - Multiple bundle support: handles multiple ZIP bundles from bin packing
+        
+        Returns:
+            TransferStats on success, None on failure
         """
+        # Initialize transfer stats
+        stats = TransferStats(
+            start_time=time.time(),
+            device_id=device_id
+        )
+        
         max_workers = self.config.get("parallel_processes", 4)
         resume_enabled = self.config.get("resume_transfer", True)
         
         # Create remote temp dir
         self.adb.run_command(f'shell "mkdir -p \'{_escape_shell_path(remote_temp_dir)}\'"', device_id)
+
+        # Bulk fetch remote file info for resume support
+        remote_file_cache = {}
+        if resume_enabled:
+            self.logger.info(f"[{device_id}] Récupération de l'état du dossier distant...")
+            remote_file_cache = self._get_remote_file_info_bulk(remote_temp_dir, device_id)
 
         # Collect all files to transfer (chunks + metadata + batch files)
         files_to_transfer = []
@@ -427,7 +795,8 @@ class TransferManager:
             else:
                 chunk_folder_path = self.temp_dir / manifest["chunk_folder"]
 
-            remote_chunk_dir = f"{remote_temp_dir}/{manifest['chunk_folder']}".replace('\\', '/')
+            remote_chunk_dir_rel = manifest['chunk_folder']
+            remote_chunk_dir = f"{remote_temp_dir}/{remote_chunk_dir_rel}".replace('\\', '/')
 
             # Create remote chunk directory
             self.adb.run_command(f'shell "mkdir -p \'{_escape_shell_path(remote_chunk_dir)}\'"', device_id)
@@ -436,14 +805,15 @@ class TransferManager:
             chunk_files = sorted(chunk_folder_path.glob("chunk_*.bin"))
             metadata_file = chunk_folder_path / "chunk_metadata.json"
             
-            # Add each chunk file to transfer list (with resume check)
+            # Add each chunk file to transfer list (with resume check using cache)
             for chunk_file in chunk_files:
-                remote_path = f"{remote_chunk_dir}/{chunk_file.name}".replace('\\', '/')
+                rel_chunk_path = f"{remote_chunk_dir_rel}/{chunk_file.name}".replace('\\', '/')
+                remote_path = f"{remote_temp_dir}/{rel_chunk_path}".replace('\\', '/')
                 local_size = chunk_file.stat().st_size
                 
-                # Resume support: check if file already exists with correct size
-                if resume_enabled:
-                    if self._check_remote_file_exists(remote_path, local_size, device_id):
+                # Resume support: check cache instead of per-file ADB call
+                if resume_enabled and rel_chunk_path in remote_file_cache:
+                    if remote_file_cache[rel_chunk_path] == local_size:
                         skipped_files += 1
                         continue  # Skip this file
                 
@@ -465,10 +835,11 @@ class TransferManager:
             remote_bundle_path = f"{remote_temp_dir}/{bundle_path.name}".replace('\\', '/')
             bundle_size = bundle_path.stat().st_size
             
-            # Resume support for bundles too
-            if resume_enabled and self._check_remote_file_exists(remote_bundle_path, bundle_size, device_id):
-                self.logger.info(f"[{device_id}] Resume: {bundle_path.name} déjà présent, ignoré")
-                continue
+            # Resume support for bundles using cache
+            if resume_enabled and bundle_path.name in remote_file_cache:
+                if remote_file_cache[bundle_path.name] == bundle_size:
+                    self.logger.info(f"[{device_id}] Resume: {bundle_path.name} déjà présent, ignoré")
+                    continue
             
             bundle_size_mb = bundle_size / (1024 * 1024)
             self.logger.info(f"[{device_id}] Transfert de {bundle_path.name} ({bundle_size_mb:.2f} MB)...")
@@ -508,7 +879,7 @@ class TransferManager:
                 if self.cancelled:
                     self.logger.info(f"[{device_id}] Transfert annulé par l'utilisateur")
                     executor.shutdown(wait=False, cancel_futures=True)
-                    return False
+                    return None
 
                 try:
                     result = future.result()
@@ -541,7 +912,7 @@ class TransferManager:
                     self.logger.success(f"[{device_id}] Tous les fichiers échoués ont été retransférés")
                 else:
                     self.logger.error(f"[{device_id}] Certains fichiers n'ont pas pu être transférés")
-                    return False
+                    return None
 
         self.logger.success(f"[{device_id}] Transfert terminé: {len(files_to_transfer)} fichiers")
 
@@ -553,7 +924,7 @@ class TransferManager:
         if verify_transfer:
             if not self._verify_transfer_on_device(remote_temp_dir, device_id):
                 self.logger.error(f"[{device_id}] Vérification échouée")
-                return False
+                return None
         elif skip_early:
             self.logger.info(f"[{device_id}] Vérification précoce ignorée (mode rapide)")
 
@@ -583,62 +954,18 @@ class TransferManager:
             else:
                 self.logger.info(f"[{device_id}] Aucun fichier temporaire à nettoyer (utilisation de chunks persistants)")
 
-        return True
-    
-    def _check_remote_file_exists(self, remote_path, expected_size, device_id):
-        """Check if a remote file exists and has the expected size.
+        # Populate final stats
+        stats.end_time = time.time()
+        stats.bytes_transferred = sum(size for _, _, size in files_to_transfer)
+        stats.files_count = len(files_to_transfer) + len(bundle_files)
+        stats.chunks_count = sum(1 for f, _, _ in files_to_transfer if 'chunk_' in str(f))
+        stats.bundles_count = len(bundle_files)
         
-        Used for resume support - skip chunks that are already transferred.
+        # Store stats for later retrieval
+        self._last_transfer_stats = stats
         
-        Args:
-            remote_path: Path on the Android device
-            expected_size: Expected file size in bytes
-            device_id: Device identifier
-            
-        Returns:
-            True if file exists with matching size, False otherwise
-        """
-        try:
-            result = self.adb.run_command(
-                f'shell "stat -c%s \'{_escape_shell_path(remote_path)}\' 2>/dev/null"',
-                device_id
-            )
-            if result:
-                remote_size = int(''.join(result).strip())
-                return remote_size == expected_size
-        except (ValueError, Exception):
-            pass
-        return False
-    
-    def _retry_failed_chunks(self, failed_files, device_id, max_retries=3):
-        """Retry transferring failed chunks."""
-        max_retries = self.config.get("max_retries", 3)
-        self.logger.info(f"[{device_id}] Nouvelle tentative pour {len(failed_files)} fichiers...")
-        
-        still_failed = list(failed_files)
-        
-        for retry in range(max_retries):
-            if not still_failed:
-                break
-            
-            self.logger.info(f"[{device_id}] Tentative {retry + 1}/{max_retries}")
-            
-            retry_failed = []
-            for local_path, remote_path in still_failed:
-                try:
-                    self.adb.run_command(
-                        f'push "{local_path}" "{remote_path}"',
-                        device_id
-                    )
-                    self.logger.success(f"[{device_id}] ✅ Réussi: {Path(local_path).name}")
-                except Exception as e:
-                    retry_failed.append((local_path, remote_path))
-                    self.logger.error(f"[{device_id}] ❌ Échec: {Path(local_path).name}")
-            
-            still_failed = retry_failed
-        
-        return len(still_failed) == 0
-    
+        return stats
+
     def _verify_transfer_on_device(self, remote_temp_dir, device_id, _depth=0):
         """Verify all files (chunks and batch) were transferred correctly.
 
@@ -654,6 +981,9 @@ class TransferManager:
 
         self.logger.info(f"[{device_id}] Vérification des fichiers transférés...")
 
+        # Bulk fetch remote file info for verification
+        remote_file_cache = self._get_remote_file_info_bulk(remote_temp_dir, device_id)
+
         verification_failed = False
         missing_files = []  # Track missing files for retry
         
@@ -668,13 +998,11 @@ class TransferManager:
             else:
                 local_chunk_dir = self.temp_dir / manifest['chunk_folder']
             
-            # 1.1 Check metadata file exists
-            metadata_path = f"{remote_chunk_dir}/chunk_metadata.json"
-            result = self.adb.run_command(
-                f'shell "[ -f \'{_escape_shell_path(metadata_path)}\' ] && echo exists"',
-                device_id
-            )
-            if not result or 'exists' not in ''.join(result):
+            # 1.1 Check metadata file exists in cache
+            rel_metadata_path = f"{chunk_folder}/chunk_metadata.json".replace('\\', '/')
+            metadata_path = f"{remote_temp_dir}/{rel_metadata_path}"
+            
+            if rel_metadata_path not in remote_file_cache:
                 self.logger.error(f"[{device_id}] Metadata manquant: {chunk_folder}")
                 verification_failed = True
                 # Add metadata to retry list
@@ -683,62 +1011,29 @@ class TransferManager:
                     missing_files.append((str(local_metadata), metadata_path))
                 continue
             
-            # 1.2 Get list of chunks on device
-            result = self.adb.run_command(
-                f'shell "ls \'{_escape_shell_path(remote_chunk_dir)}\'/chunk_*.bin 2>/dev/null"',
-                device_id
-            )
-            
-            if result:
-                device_chunks = set(Path(line.strip()).name for line in result if line.strip())
-            else:
-                device_chunks = set()
-            
-            # 1.3 Compare with expected chunks
-            expected_chunks = set(chunk_info['filename'] for chunk_info in manifest['chunks'])
-            missing = expected_chunks - device_chunks
-            
-            if missing:
-                self.logger.error(
-                    f"[{device_id}] {len(missing)} chunks manquants dans {chunk_folder}:"
-                )
-                for chunk_name in sorted(missing):
-                    self.logger.error(f"[{device_id}]   - {chunk_name}")
-                    # Add to retry list
-                    local_chunk = local_chunk_dir / chunk_name
-                    remote_chunk = f"{remote_chunk_dir}/{chunk_name}"
+            # 1.2 Compare chunks in cache with expected chunks
+            for chunk_info in manifest['chunks']:
+                rel_chunk_path = f"{chunk_folder}/{chunk_info['filename']}".replace('\\', '/')
+                remote_chunk = f"{remote_temp_dir}/{rel_chunk_path}"
+                expected_size = chunk_info['size']
+                
+                if rel_chunk_path not in remote_file_cache:
+                    self.logger.error(f"[{device_id}] Chunk manquant: {rel_chunk_path}")
+                    verification_failed = True
+                    local_chunk = local_chunk_dir / chunk_info['filename']
                     if local_chunk.exists():
                         missing_files.append((str(local_chunk), remote_chunk))
-                
-                verification_failed = True
-                continue
-            
-            # 1.4 Verify chunk sizes (fast and reliable)
-            if self.config.get("verify_sizes", True):
-                for chunk_info in manifest['chunks']:
-                    chunk_file = f"{remote_chunk_dir}/{chunk_info['filename']}"
-                    result = self.adb.run_command(
-                        f'shell "stat -c%s \'{_escape_shell_path(chunk_file)}\' 2>/dev/null"',
-                        device_id
-                    )
-                    if result:
-                        try:
-                            device_size = int(''.join(result).strip())
-                            expected_size = chunk_info['size']
-                            
-                            if device_size != expected_size:
-                                self.logger.error(
-                                    f"[{device_id}] Taille incorrecte {chunk_info['filename']}: "
-                                    f"{device_size} vs {expected_size} bytes"
-                                )
-                                verification_failed = True
-                                # Add to retry list
-                                local_chunk = local_chunk_dir / chunk_info['filename']
-                                if local_chunk.exists():
-                                    missing_files.append((str(local_chunk), chunk_file))
-                        except ValueError:
-                            self.logger.error(f"[{device_id}] Impossible de vérifier la taille de {chunk_info['filename']}")
-                            verification_failed = True
+                elif self.config.get("verify_sizes", True):
+                    device_size = remote_file_cache[rel_chunk_path]
+                    if device_size != expected_size:
+                        self.logger.error(
+                            f"[{device_id}] Taille incorrecte {chunk_info['filename']}: "
+                            f"{device_size} vs {expected_size} bytes"
+                        )
+                        verification_failed = True
+                        local_chunk = local_chunk_dir / chunk_info['filename']
+                        if local_chunk.exists():
+                            missing_files.append((str(local_chunk), remote_chunk))
 
         # --- 2. Verify Bundle ZIPs ---
         # Verify all bundle ZIP files (supports multiple bundles from bin packing)
@@ -746,32 +1041,23 @@ class TransferManager:
         for bundle_path in bundle_files:
             remote_bundle_path = f"{remote_temp_dir}/{bundle_path.name}".replace('\\', '/')
             
-            # Verify bundle ZIP exists and has correct size
-            result = self.adb.run_command(
-                f'shell "stat -c%s \'{_escape_shell_path(remote_bundle_path)}\' 2>/dev/null"',
-                device_id
-            )
-            
-            if not result:
+            if bundle_path.name not in remote_file_cache:
                 self.logger.error(f"[{device_id}] {bundle_path.name} manquant sur l'appareil")
                 verification_failed = True
                 missing_files.append((str(bundle_path), remote_bundle_path))
             elif self.config.get("verify_sizes", True):
-                try:
-                    device_size = int(''.join(result).strip())
-                    local_size = bundle_path.stat().st_size
-                    
-                    if device_size != local_size:
-                        self.logger.error(
-                            f"[{device_id}] Taille incorrecte {bundle_path.name}: "
-                            f"{device_size} vs {local_size} bytes"
-                        )
-                        verification_failed = True
-                        missing_files.append((str(bundle_path), remote_bundle_path))
-                    else:
-                        self.logger.success(f"[{device_id}] {bundle_path.name} vérifié ({local_size / (1024*1024):.2f} MB)")
-                except ValueError:
-                    self.logger.warning(f"[{device_id}] Impossible de vérifier la taille de {bundle_path.name}")
+                device_size = remote_file_cache[bundle_path.name]
+                local_size = bundle_path.stat().st_size
+                
+                if device_size != local_size:
+                    self.logger.error(
+                        f"[{device_id}] Taille incorrecte {bundle_path.name}: "
+                        f"{device_size} vs {local_size} bytes"
+                    )
+                    verification_failed = True
+                    missing_files.append((str(bundle_path), remote_bundle_path))
+                else:
+                    self.logger.success(f"[{device_id}] {bundle_path.name} vérifié ({local_size / (1024*1024):.2f} MB)")
 
         # If verification failed, try to retry missing files
         if verification_failed and missing_files:

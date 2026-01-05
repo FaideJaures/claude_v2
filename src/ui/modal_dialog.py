@@ -119,6 +119,114 @@ class TransferScriptModal(BaseModal):
         )
         self.ok_button.pack(side=tk.LEFT, padx=10)
 
+
+class PreApkConfirmationModal(tk.Toplevel):
+    """Modal for pre-APK confirmation before transfer starts."""
+    def __init__(self, master, app_name="Application", device_id=None, on_done=None, on_cancel=None):
+        super().__init__(master)
+
+        if device_id:
+            self.title(f"[{device_id}] Pré-Transfert: {app_name}")
+        else:
+            self.title(f"Pré-Transfert: {app_name}")
+
+        self.geometry("700x500")
+        self.configure(bg="#e3f2fd")
+        self.transient(master)
+        self.grab_set()
+
+        self.on_done = on_done
+        self.on_cancel = on_cancel
+        self.result = False
+
+        # Title frame
+        title_frame = tk.Frame(self, bg="#1976d2", height=70)
+        title_frame.pack(fill=tk.X)
+        title_frame.pack_propagate(False)
+
+        title_label = tk.Label(
+            title_frame,
+            text=f"📱 Pré-Transfert: {app_name}",
+            bg="#1976d2",
+            fg="white",
+            font=("Arial", 16, "bold")
+        )
+        title_label.pack(expand=True)
+
+        # Main content
+        content_frame = tk.Frame(self, bg="#e3f2fd")
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=20)
+
+        # Instructions
+        instruction = tk.Label(
+            content_frame,
+            text="Une application a été installée et ouverte sur votre appareil.\n\n"
+                 "Veuillez suivre les instructions à l'écran de l'appareil\n"
+                 "puis cliquez sur 'Continuer le transfert' pour poursuivre.",
+            bg="#e3f2fd",
+            font=("Arial", 13),
+            justify=tk.CENTER,
+            wraplength=640
+        )
+        instruction.pack(pady=(20, 30))
+
+        # Info box
+        info_frame = tk.Frame(content_frame, bg="#bbdefb", relief=tk.RAISED, borderwidth=3)
+        info_frame.pack(fill=tk.X, pady=20, padx=20)
+
+        info_label = tk.Label(
+            info_frame,
+            text=f"📦 Application: {app_name}\n\n"
+                 "👉 Assurez-vous que l'application est ouverte sur votre appareil",
+            bg="#bbdefb",
+            font=("Arial", 12),
+            justify=tk.CENTER,
+            pady=20
+        )
+        info_label.pack()
+
+        # Buttons
+        button_frame = tk.Frame(self, bg="#e3f2fd")
+        button_frame.pack(pady=25)
+
+        ok_button = tk.Button(
+            button_frame,
+            text="✓ Continuer le transfert",
+            command=self.done,
+            bg="#27ae60",
+            fg="white",
+            font=("Arial", 13, "bold"),
+            padx=35,
+            pady=18
+        )
+        ok_button.pack(side=tk.LEFT, padx=10)
+
+        cancel_button = tk.Button(
+            button_frame,
+            text="Annuler",
+            command=self.cancel,
+            bg="#e74c3c",
+            fg="white",
+            font=("Arial", 11),
+            padx=20,
+            pady=18
+        )
+        cancel_button.pack(side=tk.LEFT, padx=10)
+
+        self.protocol("WM_DELETE_WINDOW", self.cancel)
+
+    def done(self):
+        self.result = True
+        if self.on_done:
+            self.on_done()
+        self.destroy()
+
+    def cancel(self):
+        self.result = False
+        if self.on_cancel:
+            self.on_cancel()
+        self.destroy()
+
 class TermuxInstallModal(BaseModal):
     def __init__(self, master, device_id=None, **kwargs):
         super().__init__(

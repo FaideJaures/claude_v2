@@ -166,6 +166,7 @@ class ReassemblyManager:
     def cancel(self):
         """Cancel the reassembly process."""
         self.cancelled = True
+        self.adb.terminate_all()
         self.logger.info("Réassemblage annulé par l'utilisateur.")
 
     def _check_storage_permission_granted(self):

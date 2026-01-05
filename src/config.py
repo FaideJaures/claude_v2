@@ -67,3 +67,35 @@ DEFAULT_REFRESH_INTERVAL = 3000
 
 # Automatically connect to known WiFi devices on startup
 DEFAULT_AUTO_CONNECT_WIFI = True
+
+# === WORKER POOL SETTINGS ===
+# Multi-worker parallelism for faster processing
+
+# PC-side workers (chunking large files)
+# Uses ProcessPoolExecutor for CPU-bound operations
+DEFAULT_CHUNKING_WORKERS = 4
+
+# PC-side workers (zipping small files into bundles)
+# Uses ProcessPoolExecutor for CPU-bound operations
+DEFAULT_ZIPPING_WORKERS = 10
+
+# Device-side workers (reassembling chunks via cat)
+# Uses ThreadPoolExecutor with multiple ADB sessions
+DEFAULT_REASSEMBLY_WORKERS = 4
+
+# Device-side workers (unzipping bundles)
+# Uses ThreadPoolExecutor with multiple ADB sessions
+DEFAULT_UNZIP_WORKERS = 10
+
+# Device-side workers (moving files to final destination)
+# Uses ThreadPoolExecutor with multiple ADB sessions
+DEFAULT_FINAL_MOVE_WORKERS = 10
+
+# Small file handling mode: "zip" or "batch_push"
+# "zip" - Bundle small files into ZIP archives (default, more efficient)
+# "batch_push" - Push files directly without zipping (simpler but slower)
+DEFAULT_SMALL_FILE_MODE = "zip"
+
+# Enable pre-APK installation before transfer
+# If enabled, installs and opens the APK from pre-apk/ folder before transfer
+DEFAULT_PRE_APK_ENABLED = True

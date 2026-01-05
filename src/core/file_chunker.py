@@ -283,38 +283,27 @@ for CHUNK_DIR in $CHUNK_FOLDERS; do
     # Remove output file if exists
     rm -f "$OUTPUT_FILE"
 
-    # Reassemble chunks using cat (in correct order)
-    CHUNK_INDEX=0
-    FAILED_CHUNK=0
-
-    while [ $CHUNK_INDEX -lt $NUM_CHUNKS ]; do
-        CHUNK_FILE=$(printf "$CHUNK_DIR/chunk_%04d.bin" $CHUNK_INDEX)
-
-        if [ ! -f "$CHUNK_FILE" ]; then
-            log_error "  Missing chunk: chunk_$(printf '%04d' $CHUNK_INDEX).bin"
-            FAILED_CHUNK=1
-            break
-        fi
-
-        # Append chunk to output
-        cat "$CHUNK_FILE" >> "$OUTPUT_FILE" 2>/dev/null
+    # Reassemble chunks using a single cat command with glob expansion
+    # This is MUCH faster than a loop for many chunks
+    log_info "  Reassembling chunks for: $ORIGINAL_NAME"
+    
+    if ls "$CHUNK_DIR"/chunk_*.bin >/dev/null 2>&1; then
+        cat "$CHUNK_DIR"/chunk_*.bin > "$OUTPUT_FILE"
         if [ $? -ne 0 ]; then
-            log_error "  Failed to read chunk_$(printf '%04d' $CHUNK_INDEX).bin"
-            FAILED_CHUNK=1
-            break
+            log_error "  Failed to reassemble chunks for $ORIGINAL_NAME"
+            rm -f "$OUTPUT_FILE" 2>/dev/null
+            FAILED_CHUNKS=$((FAILED_CHUNKS + 1))
+            continue
         fi
-
-        CHUNK_INDEX=$((CHUNK_INDEX + 1))
-
-        # Progress indicator
-        PROGRESS=$((CHUNK_INDEX * 100 / NUM_CHUNKS))
-        echo "  Progress: $CHUNK_INDEX/$NUM_CHUNKS ($PROGRESS%)"
-    done
+    else
+        log_error "  No chunk files found in $CHUNK_DIR"
+        FAILED_CHUNKS=$((FAILED_CHUNKS + 1))
+        continue
+    fi
 
     # Check if reassembly succeeded
-    if [ "$FAILED_CHUNK" -eq 1 ]; then
-        log_error "  Reassembly failed - chunk errors"
-        rm -f "$OUTPUT_FILE" 2>/dev/null
+    if [ ! -f "$OUTPUT_FILE" ]; then
+        log_error "  Reassembly failed - output file not created"
         FAILED_CHUNKS=$((FAILED_CHUNKS + 1))
         continue
     fi
