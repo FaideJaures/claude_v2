@@ -1014,20 +1014,48 @@ class Application(tk.Frame):
         
         def run_transfer():
             success = False
+            device_id = devices[0]
+            
+            # Setup progress bars for single device
+            self._create_device_progress_bars(devices)
+            self._update_overall_progress(0)
+            self._update_device_progress(device_id, 0, "Démarrage...")
+            
             try:
+                # Setup progress callback for real-time updates
+                def update_progress(percent, status):
+                    self._update_device_progress(device_id, percent, status)
+                    self._update_overall_progress(percent)
+                
+                self.transfer_manager.progress_callback = update_progress
+                
                 if use_transfer_folder:
                     transfer_folder = self.folder_manager.get_transfer_folder_path(source)
+                    self._update_device_progress(device_id, 10, "Préparation...")
+                    self._update_overall_progress(10)
                     # Use specialized transfer method
-                    success = self.transfer_manager.transfer_from_prepared_folder(transfer_folder, target, devices[0])
+                    success = self.transfer_manager.transfer_from_prepared_folder(transfer_folder, target, device_id)
                 else:
                     # Standard transfer
                     if len(devices) == 1:
-                        success = self.transfer_manager.start_transfer(source, target, devices[0])
+                        self._update_device_progress(device_id, 10, "Préparation...")
+                        self._update_overall_progress(10)
+                        success = self.transfer_manager.start_transfer(source, target, device_id)
                     else:
                         self.run_multi_device_transfer(source, target, devices)
                         return  # Multi-device handles its own cleanup
+                
+                # Update progress on completion
+                if success:
+                    self._update_device_progress(device_id, 100, "Terminé ✓")
+                    self._update_overall_progress(100)
+                else:
+                    self._update_device_progress(device_id, 100, "Échoué ✗")
+                    self._update_overall_progress(100)
+                    
             except Exception as e:
                 self.logger.error(f"Erreur lors du transfert: {e}")
+                self._update_device_progress(device_id, 0, "Erreur")
                 success = False
             
             # Call cleanup with success info for single-device transfers

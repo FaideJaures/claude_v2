@@ -114,23 +114,23 @@ class FileChunker:
 
         if logger: logger.info(f"Splitting {file_path.name} into {num_chunks} chunks...")
 
-        # Determine the path to use in metadata
+        # Determine the path to use in metadata (normalize to forward slashes for Android)
         if persistent_chunks:
             # For persistent chunks, metadata should point to where chunks will be copied in output_folder
             copy_dest = output_folder / rel_path.parent / chunk_dir_name
-            metadata_chunk_folder = str(copy_dest.relative_to(output_folder))
+            metadata_chunk_folder = str(copy_dest.relative_to(output_folder)).replace('\\', '/')
         else:
-            metadata_chunk_folder = str(chunk_output_dir.relative_to(output_folder))
+            metadata_chunk_folder = str(chunk_output_dir.relative_to(output_folder)).replace('\\', '/')
 
         chunk_info = {
-            "original_file": str(rel_path),
+            "original_file": str(rel_path).replace('\\', '/'),
             "original_size": file_size,
             "original_md5": original_md5,
             "chunk_folder": metadata_chunk_folder,
             "chunk_size": chunk_size_bytes,
             "num_chunks": num_chunks,
             "chunks": [],
-            "persistent_source": str(chunk_output_dir) if persistent_chunks else None  # Track original location
+            "persistent_source": str(chunk_output_dir).replace('\\', '/') if persistent_chunks else None  # Track original location
         }
 
         # Split file into chunks

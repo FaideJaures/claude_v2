@@ -43,6 +43,8 @@ class TransferManager:
         self.files_to_batch = []
         self.manifests = []
         self.modal_callback = None  # Will be set by UI
+        self.progress_callback = None  # For progress updates: callback(percent, status)
+        self.is_prepared_folder_transfer = False  # Flag to prevent cleanup of prepared folder
         self.cancelled = False
 
     def cancel(self):
@@ -120,6 +122,11 @@ class TransferManager:
             if not output_path.exists():
                 output_path.mkdir(parents=True)
             
+            # CRITICAL: Reset all lists before scanning to avoid stale data
+            self.manifests = []
+            self.files_to_chunk = []
+            self.files_to_batch = []
+            
             # 1. Scan files
             self.logger.info("Analyse des fichiers...")
             self.scan_files(source_dir)
@@ -133,9 +140,18 @@ class TransferManager:
             chunking_time = time.time() - chunking_start_time
             self.logger.info(f"Temps de traitement: {chunking_time:.2f} secondes.")
             
-            # 3. Save transfer state
+            # 3. Save transfer state - normalize all paths to use forward slashes
+            normalized_manifests = []
+            for manifest in self.manifests:
+                m = manifest.copy()
+                if 'chunk_folder' in m:
+                    m['chunk_folder'] = m['chunk_folder'].replace('\\', '/')
+                if 'persistent_source' in m and m['persistent_source']:
+                    m['persistent_source'] = m['persistent_source'].replace('\\', '/')
+                normalized_manifests.append(m)
+            
             state = {
-                "manifests": self.manifests,
+                "manifests": normalized_manifests,
                 "timestamp": time.time(),
                 "source_dir": source_dir
             }
@@ -167,14 +183,29 @@ class TransferManager:
                 
             with open(state_file, "r") as f:
                 state = json.load(f)
-                
-            self.manifests = state.get("manifests", [])
+            
+            # Normalize paths in loaded manifests (ensure forward slashes for Android)
+            loaded_manifests = state.get("manifests", [])
+            self.manifests = []
+            for manifest in loaded_manifests:
+                m = manifest.copy()
+                if 'chunk_folder' in m:
+                    m['chunk_folder'] = m['chunk_folder'].replace('\\', '/')
+                if 'persistent_source' in m and m['persistent_source']:
+                    m['persistent_source'] = m['persistent_source'].replace('\\', '/')
+                self.manifests.append(m)
+            
+            # Clear file lists - we're loading from prepared folder, not rescanning
+            self.files_to_chunk = []
+            self.files_to_batch = []
+            
             self.logger.info(f"[{device_id}] {len(self.manifests)} manifestes chargés.")
             
             # Initialize temp_dir to point to prepared_dir for parallel_transfer to work
             # Note: parallel_transfer expects self.temp_dir to contain the bundles and chunks
             original_temp_dir = getattr(self, 'temp_dir', None)
             self.temp_dir = prepared_path
+            self.is_prepared_folder_transfer = True  # Prevent cleanup from deleting reusable chunks
             
             try:
                 # 3. Transfer files
@@ -471,6 +502,7 @@ class TransferManager:
             
             # Wait for all transfers to complete
             completed = 0
+            total_files = len(files_to_transfer)
             for future in concurrent.futures.as_completed(futures):
                 # Check for cancellation
                 if self.cancelled:
@@ -483,9 +515,17 @@ class TransferManager:
                     file_info = future_to_file[future]
                     transfer_results['successful'].append(file_info)
                     completed += 1
-                    if completed % 10 == 0:  # Log progress every 10 files
-                        progress = (completed / len(files_to_transfer)) * 100
-                        self.logger.info(f"[{device_id}] Progression: {completed}/{len(files_to_transfer)} ({progress:.1f}%)")
+                    
+                    # Calculate progress (files transfer = 20-80% of total progress)
+                    progress = 20 + int((completed / total_files) * 60)
+                    
+                    # Call progress callback if set
+                    if self.progress_callback:
+                        self.progress_callback(progress, f"Transfert {completed}/{total_files}")
+                    
+                    # Log progress every 10 files
+                    if completed % 10 == 0:
+                        self.logger.info(f"[{device_id}] Progression: {completed}/{total_files} ({progress}%)")
                 except Exception as e:
                     file_info = future_to_file[future]
                     transfer_results['failed'].append(file_info)
@@ -518,9 +558,10 @@ class TransferManager:
             self.logger.info(f"[{device_id}] Vérification précoce ignorée (mode rapide)")
 
         # Aggressive cleanup: delete local chunk files AFTER successful verification
-        # Note: For persistent chunks, we keep them for reuse across transfers
-        # Only temp folder files (non-persistent) would be cleaned here
-        if self.config.get("aggressive_temp_cleanup", True):
+        # Note: Skip cleanup entirely for prepared folder transfers (chunks should be reusable)
+        if self.is_prepared_folder_transfer:
+            self.logger.info(f"[{device_id}] Transfert depuis dossier préparé - chunks conservés pour réutilisation")
+        elif self.config.get("aggressive_temp_cleanup", True):
             self.logger.info(f"[{device_id}] Nettoyage des fichiers temporaires locaux...")
             cleaned_files = 0
             for manifest in self.manifests:
