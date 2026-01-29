@@ -202,8 +202,24 @@ class SettingsWindow(tk.Toplevel):
         section_fast.pack(pady=(20, 10))
         
         # Hint label
-        fast_hint = tk.Label(scrollable_frame, text="(Ignorer les vérifications redondantes)", font=("Arial", 9, "italic"), fg="gray")
+        fast_hint = tk.Label(scrollable_frame, text="(Options pour accélérer le transfert)", font=("Arial", 9, "italic"), fg="gray")
         fast_hint.pack(anchor="w", padx=20)
+
+        # === DIRECT TRANSFER MODE (NEW) ===
+        direct_frame = tk.Frame(scrollable_frame, relief="groove", bd=1)
+        direct_frame.pack(pady=10, padx=20, fill=tk.X)
+        
+        self.direct_transfer_mode = tk.BooleanVar(value=self.config.get("direct_transfer_mode", False))
+        tk.Checkbutton(direct_frame, text="🚀 Mode Direct (fichiers → destination finale)", 
+                      variable=self.direct_transfer_mode, font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
+        
+        direct_desc = tk.Label(direct_frame, 
+                              text="• Petits fichiers pushés directement vers destination\n"
+                                   "• Pas de dossier temporaire pour <100MB\n"
+                                   "• Plus rapide, pas de nettoyage\n"
+                                   "• ⚠️ Gros fichiers toujours via temp+reassembly",
+                              font=("Arial", 8), fg="gray", justify="left")
+        direct_desc.pack(anchor="w", padx=25, pady=(0, 5))
 
         # Skip early verification (before reassembly)
         self.skip_early_verification = tk.BooleanVar(value=self.config.get("skip_early_verification", False))
@@ -216,6 +232,10 @@ class SettingsWindow(tk.Toplevel):
         # Skip size verification
         self.skip_size_verification = tk.BooleanVar(value=self.config.get("skip_size_verification", False))
         tk.Checkbutton(scrollable_frame, text="Ignorer vérification des tailles", variable=self.skip_size_verification).pack(anchor="w", padx=20, pady=3)
+
+        # Skip resume check (new)
+        self.skip_resume_check = tk.BooleanVar(value=self.config.get("skip_resume_check", False))
+        tk.Checkbutton(scrollable_frame, text="Ignorer scan fichiers distants (transfert frais)", variable=self.skip_resume_check).pack(anchor="w", padx=20, pady=3)
 
         # ═══════════════════════════════════════════════════════════════
         # SECTION 5: APPAREIL (SECURITE)
@@ -343,6 +363,9 @@ class SettingsWindow(tk.Toplevel):
         self.config["skip_early_verification"] = self.skip_early_verification.get()
         self.config["trust_local_chunks"] = self.trust_local_chunks.get()
         self.config["skip_size_verification"] = self.skip_size_verification.get()
+        self.config["skip_resume_check"] = self.skip_resume_check.get()
+        # Direct transfer mode
+        self.config["direct_transfer_mode"] = self.direct_transfer_mode.get()
         # WiFi settings
         self.config["refresh_interval"] = self.refresh_interval.get()
         self.config["auto_connect_wifi"] = self.auto_connect_wifi.get()
@@ -1298,6 +1321,9 @@ class Application(tk.Frame):
                 device_start = time_module.time()
                 self.logger.info(f"[{device_id}] ⏱️ Démarrage thread à T+0.000s")
                 
+                # Check if direct transfer mode is enabled
+                use_direct_mode = self.config.get("direct_transfer_mode", False)
+                
                 try:
                     # Update progress
                     self._update_device_progress(device_id, 5, "Initialisation...")
@@ -1313,8 +1339,15 @@ class Application(tk.Frame):
                         success = device_transfer_mgr.transfer_from_prepared_folder(
                             str(transfer_folder), target, device_id
                         )
+                    elif use_direct_mode:
+                        # Use DIRECT transfer mode - push directly to destination
+                        self.logger.info(f"[{device_id}] Mode DIRECT - push vers destination finale...")
+                        self._update_device_progress(device_id, 10, "Direct...")
+                        success = device_transfer_mgr.start_transfer_direct(
+                            source, target, device_id
+                        )
                     else:
-                        # Use standard parallel transfer
+                        # Use standard parallel transfer (temp folder + reassembly)
                         self.logger.info(f"[{device_id}] Transfert parallèle standard...")
                         self._update_device_progress(device_id, 10, "Transfert...")
                         success = device_transfer_mgr.start_transfer_parallel(

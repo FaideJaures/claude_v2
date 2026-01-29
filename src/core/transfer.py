@@ -328,6 +328,250 @@ class TransferManager:
         self.logger.success(f"Transfert parallèle terminé en {total_time:.2f}s !")
         return True
 
+    def start_transfer_direct(self, source_dir, target_dir, device_id):
+        """
+        DIRECT TRANSFER MODE - Push files directly to final destination.
+        
+        This mode skips the temp folder + reassembly for small files:
+        - Small files (<100MB): Pushed directly to target_dir
+        - Large files (>100MB): Still use temp folder + chunk reassembly
+        
+        Benefits:
+        - No cleanup phase for small files
+        - No move phase for small files
+        - Simpler and faster for small file collections
+        
+        Limitations:
+        - Large files still need chunking
+        - Partial failures leave incomplete data at destination
+        - No atomic commit (files appear as they transfer)
+        
+        Args:
+            source_dir: Source directory path on PC
+            target_dir: Target directory path on device (final destination)
+            device_id: Device identifier
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        total_start_time = time.time()
+        self.logger.info(f"=== TRANSFERT DIRECT vers {device_id} ===")
+        self.logger.info(f"Source: {source_dir}")
+        self.logger.info(f"Destination directe: {target_dir}")
+        
+        # Get thresholds
+        direct_threshold = self.config.get("direct_push_threshold", 100 * 1024 * 1024)
+        max_workers = self.config.get("parallel_processes", 4)
+        resume_enabled = self.config.get("resume_transfer", True)
+        
+        # === 0. PRE-APK FLOW ===
+        if self.config.get("pre_apk_enabled", True):
+            self.logger.info("Phase 0: Pré-APK...")
+            pre_apk_mgr = PreApkManager(
+                self.adb, 
+                self.logger, 
+                self.config,
+                modal_callback=self.modal_callback
+            )
+            if not pre_apk_mgr.run_pre_transfer(device_id):
+                self.logger.error("Pré-APK flow annulé ou échoué")
+                return False
+        
+        # === 1. SCAN AND CATEGORIZE FILES ===
+        phase_start = time.time()
+        self.logger.info("Phase 1: Analyse des fichiers...")
+        
+        source_path = Path(source_dir)
+        direct_files = []  # Files to push directly: (local_path, relative_path, size)
+        large_files = []   # Files that need chunking: (local_path, size)
+        total_size = 0
+        
+        for root, dirs, files in os.walk(source_path):
+            # Skip chunk folders
+            dirs[:] = [d for d in dirs if not d.endswith('_chunks')]
+            
+            for file in files:
+                file_path = Path(root) / file
+                try:
+                    file_size = file_path.stat().st_size
+                    rel_path = file_path.relative_to(source_path)
+                    total_size += file_size
+                    
+                    if file_size > direct_threshold:
+                        large_files.append((file_path, file_size))
+                    else:
+                        direct_files.append((file_path, str(rel_path).replace('\\', '/'), file_size))
+                except OSError as e:
+                    self.logger.error(f"Erreur accès fichier {file_path}: {e}")
+        
+        self.logger.info(f"  {len(direct_files)} fichiers directs ({sum(f[2] for f in direct_files) / (1024*1024):.1f} MB)")
+        self.logger.info(f"  {len(large_files)} grands fichiers ({sum(f[1] for f in large_files) / (1024*1024):.1f} MB)")
+        self.logger.info(f"  Durée: {time.time() - phase_start:.2f}s")
+        
+        # === 2. CREATE TARGET DIRECTORIES ===
+        phase_start = time.time()
+        self.logger.info("Phase 2: Création des répertoires...")
+        
+        # Collect unique directories to create
+        target_dirs = set()
+        target_dirs.add(target_dir)
+        for _, rel_path, _ in direct_files:
+            parent = os.path.dirname(rel_path)
+            if parent:
+                target_dirs.add(f"{target_dir}/{parent}".replace('\\', '/'))
+        
+        # Batch create directories
+        if target_dirs:
+            mkdir_commands = [f"mkdir -p '{_escape_shell_path(d)}'" for d in sorted(target_dirs)]
+            self.adb.run_shell_batch(mkdir_commands, device_id)
+        
+        self.logger.info(f"  {len(target_dirs)} répertoires créés")
+        self.logger.info(f"  Durée: {time.time() - phase_start:.2f}s")
+        
+        # === 3. GET REMOTE FILE INFO FOR RESUME ===
+        remote_file_cache = {}
+        if resume_enabled and direct_files:
+            phase_start = time.time()
+            self.logger.info("Phase 3: Vérification fichiers existants...")
+            remote_file_cache = self._get_remote_file_info_bulk(target_dir, device_id)
+            self.logger.info(f"  {len(remote_file_cache)} fichiers distants trouvés")
+            self.logger.info(f"  Durée: {time.time() - phase_start:.2f}s")
+        
+        # === 4. DIRECT PUSH SMALL FILES ===
+        if direct_files:
+            phase_start = time.time()
+            self.logger.info(f"Phase 4: Push direct de {len(direct_files)} fichiers...")
+            
+            files_to_push = []
+            skipped = 0
+            
+            for local_path, rel_path, file_size in direct_files:
+                remote_path = f"{target_dir}/{rel_path}".replace('\\', '/')
+                
+                # Resume check
+                if resume_enabled and rel_path in remote_file_cache:
+                    if remote_file_cache[rel_path] == file_size:
+                        skipped += 1
+                        continue
+                
+                files_to_push.append((str(local_path), remote_path, file_size))
+            
+            if skipped > 0:
+                self.logger.info(f"  Resume: {skipped} fichiers déjà présents")
+            
+            # Parallel push
+            successful = 0
+            failed = 0
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {}
+                for local_path, remote_path, file_size in files_to_push:
+                    future = executor.submit(
+                        self.adb.run_command,
+                        f'push "{local_path}" "{remote_path}"',
+                        device_id
+                    )
+                    futures[future] = (local_path, remote_path)
+                
+                completed = 0
+                total = len(files_to_push)
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        result = future.result()
+                        if result is not None:
+                            successful += 1
+                        else:
+                            failed += 1
+                            file_info = futures[future]
+                            self.logger.error(f"  Échec: {Path(file_info[0]).name}")
+                    except Exception as e:
+                        failed += 1
+                        self.logger.error(f"  Exception: {e}")
+                    
+                    completed += 1
+                    if completed % 20 == 0:
+                        self.logger.info(f"  Progression: {completed}/{total}")
+            
+            self.logger.info(f"  Réussis: {successful}, Échoués: {failed}, Ignorés: {skipped}")
+            self.logger.info(f"  Durée: {time.time() - phase_start:.2f}s")
+            
+            if failed > 0:
+                self.logger.warning(f"  {failed} fichiers n'ont pas été transférés")
+        
+        # === 5. HANDLE LARGE FILES (CHUNKING) ===
+        if large_files:
+            phase_start = time.time()
+            self.logger.info(f"Phase 5: Traitement de {len(large_files)} grands fichiers...")
+            
+            # These need temp folder + reassembly
+            remote_temp_dir = self.config.get("remote_temp_dir", "/sdcard/transfer_temp")
+            
+            with tempfile.TemporaryDirectory() as temp_dir:
+                self.temp_dir = Path(temp_dir)
+                self.files_to_chunk = [f[0] for f in large_files]
+                self.files_to_batch = []  # No bundling for direct mode
+                self.manifests = []
+                
+                # Chunk large files
+                self.logger.info("  Chunking des grands fichiers...")
+                worker_config = self.get_worker_config()
+                
+                if len(self.files_to_chunk) >= 2:
+                    self.manifests = ParallelChunker.chunk_files_parallel(
+                        files=self.files_to_chunk,
+                        source_folder=source_path,
+                        output_folder=self.temp_dir,
+                        chunk_size=self.config.get("chunk_size", 100 * 1024 * 1024),
+                        workers=worker_config.chunking_workers,
+                        logger=self.logger,
+                        persistent_chunks=False
+                    )
+                else:
+                    for file_path in self.files_to_chunk:
+                        manifest = FileChunker.chunk_file(
+                            file_path=file_path,
+                            source_folder=source_path,
+                            output_folder=self.temp_dir,
+                            chunk_size_bytes=self.config.get("chunk_size", 100 * 1024 * 1024),
+                            progress_callback=self.logger.info,
+                            logger=self.logger,
+                            persistent_chunks=False,
+                        )
+                        self.manifests.append(manifest)
+                
+                # Transfer chunks to temp
+                self.logger.info("  Transfert des chunks...")
+                stats = self.parallel_transfer(remote_temp_dir, device_id)
+                
+                if stats is None:
+                    self.logger.error("  Transfert des chunks échoué")
+                    return False
+                
+                # Reassemble directly to target
+                self.logger.info("  Réassemblage vers destination finale...")
+                device_pool = DeviceWorkerPool(
+                    self.adb,
+                    device_id,
+                    self.logger,
+                    self.config
+                )
+                
+                success = device_pool.run_full_reassembly_flow(
+                    manifests=self.manifests,
+                    remote_temp_dir=remote_temp_dir,
+                    target_dir=target_dir
+                )
+                
+                if not success:
+                    self.logger.error("  Réassemblage échoué")
+                    return False
+            
+            self.logger.info(f"  Durée: {time.time() - phase_start:.2f}s")
+        
+        total_time = time.time() - total_start_time
+        self.logger.success(f"Transfert direct terminé en {total_time:.2f}s !")
+        return True
+
     def prepare_transfer(self, source_dir, output_dir):
         """
         Prepare files for transfer (factorization): chunk and bundle to output_dir.

@@ -121,3 +121,16 @@ DEFAULT_UNLOCK_DIGIT_DELAY = 0.15
 # When True, doesn't scan remote directory for existing files
 # Faster but won't skip already-transferred files
 DEFAULT_SKIP_RESUME_CHECK = False
+
+# === DIRECT TRANSFER MODE ===
+# Direct transfer mode pushes files directly to destination without temp folder
+# Benefits: No cleanup, no move phase, simpler flow
+# Limitations: Large files still need chunking in temp, no atomic commit
+
+# Enable direct transfer mode
+DEFAULT_DIRECT_TRANSFER_MODE = False
+
+# Threshold for direct push (files smaller than this go directly to destination)
+# Files larger than this threshold are chunked and reassembled via temp folder
+# Default: Same as chunking threshold (100MB)
+DEFAULT_DIRECT_PUSH_THRESHOLD = 100 * 1024 * 1024
