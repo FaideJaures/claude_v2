@@ -38,7 +38,25 @@ class WorkerConfig:
     small_file_mode: str = "zip"
 
 
-def _chunk_single_file(args: tuple) -> dict:
+class ListLogger:
+    """Simple logger that collects messages in a list for return from workers."""
+    def __init__(self):
+        self.logs = []
+
+    def info(self, message):
+        self.logs.append(("info", message))
+
+    def error(self, message):
+        self.logs.append(("error", message))
+
+    def success(self, message):
+        self.logs.append(("success", message))
+
+    def warning(self, message):
+        self.logs.append(("warning", message))
+
+
+def _chunk_single_file(args: tuple) -> tuple:
     """
     Wrapper function for ProcessPoolExecutor chunking.
     
@@ -48,22 +66,32 @@ def _chunk_single_file(args: tuple) -> dict:
         args: Tuple of (file_path, source_folder, output_folder, chunk_size, persistent_chunks)
         
     Returns:
-        Chunk manifest dictionary
+        Tuple of (Chunk manifest dictionary, List of log messages)
     """
     file_path, source_folder, output_folder, chunk_size, persistent_chunks = args
+    logger = ListLogger()
     
-    return FileChunker.chunk_file(
-        file_path=Path(file_path),
-        source_folder=Path(source_folder),
-        output_folder=Path(output_folder),
-        chunk_size_bytes=chunk_size,
-        progress_callback=None,  # No callback in subprocess
-        logger=None,  # No logger in subprocess
-        persistent_chunks=persistent_chunks
-    )
+    try:
+        manifest = FileChunker.chunk_file(
+            file_path=Path(file_path),
+            source_folder=Path(source_folder),
+            output_folder=Path(output_folder),
+            chunk_size_bytes=chunk_size,
+            progress_callback=None,  # No callback in subprocess
+            logger=logger,  # Pass our capturing logger
+            persistent_chunks=persistent_chunks
+        )
+        return manifest, logger.logs
+    except Exception as e:
+        logger.error(f"Error chunking {Path(file_path).name}: {e}")
+        raise e  # Re-raise to be caught by future.exception() but we lose logs if we don't catch there. 
+                 # Better to return None manifest and logs.
+                 # Actually, let's let exception propagate but maybe FileChunker logs before crash?
+                 # If we return normally, we get logs. If exception, we get exception.
+        return None, logger.logs
 
 
-def _create_single_bundle(args: tuple) -> Path:
+def _create_single_bundle(args: tuple) -> tuple:
     """
     Wrapper function for ProcessPoolExecutor zipping.
     
@@ -73,19 +101,25 @@ def _create_single_bundle(args: tuple) -> Path:
         args: Tuple of (bundle_files, source_dir, bundle_path)
         
     Returns:
-        Path to created bundle
+        Tuple of (Path to created bundle, List of log messages)
     """
     bundle_files, source_dir, bundle_path = args
     source_dir = Path(source_dir)
     bundle_path = Path(bundle_path)
+    logger = ListLogger()
     
-    with zipfile.ZipFile(bundle_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
-        for file_path, file_size in bundle_files:
-            file_path = Path(file_path)
-            rel_path = file_path.relative_to(source_dir)
-            zf.write(file_path, arcname=str(rel_path))
-    
-    return bundle_path
+    try:
+        with zipfile.ZipFile(bundle_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
+            for file_path, file_size in bundle_files:
+                file_path = Path(file_path)
+                rel_path = file_path.relative_to(source_dir)
+                zf.write(file_path, arcname=str(rel_path))
+        
+        logger.success(f"Bundle created: {bundle_path.name} ({len(bundle_files)} files)")
+        return bundle_path, logger.logs
+    except Exception as e:
+        logger.error(f"Error creating bundle {bundle_path.name}: {e}")
+        return None, logger.logs
 
 
 class ParallelChunker:
@@ -150,16 +184,26 @@ class ParallelChunker:
             for future in as_completed(future_to_file):
                 file_path = future_to_file[future]
                 try:
-                    manifest = future.result()
-                    manifests.append(manifest)
-                    completed += 1
+                    result, worker_logs = future.result()
                     
-                    if progress_callback:
-                        progress_callback(completed, total, Path(file_path).name)
-                    
-                    if logger and completed % 5 == 0:
-                        logger.info(f"Chunking: {completed}/{total} fichiers traités")
+                    # Replay logs from worker
+                    if logger and worker_logs:
+                        for level, msg in worker_logs:
+                            if level == "info": logger.info(msg)
+                            elif level == "error": logger.error(msg)
+                            elif level == "success": logger.success(msg)
+                            elif level == "warning": logger.warning(msg)
+
+                    if result:
+                        manifests.append(result)
+                        completed += 1
                         
+                        if progress_callback:
+                            progress_callback(completed, total, Path(file_path).name)
+                        
+                        if logger and completed % 5 == 0:
+                            logger.info(f"Chunking: {completed}/{total} fichiers traités")
+                    
                 except Exception as e:
                     if logger:
                         logger.error(f"Erreur chunking {Path(file_path).name}: {e}")
@@ -236,17 +280,27 @@ class ParallelZipper:
             for future in as_completed(future_to_bundle):
                 bundle_path = future_to_bundle[future]
                 try:
-                    result_path = future.result()
-                    created_paths.append(result_path)
-                    completed += 1
+                    result_path, worker_logs = future.result()
                     
-                    bundle_name = Path(bundle_path).name
-                    if progress_callback:
-                        progress_callback(completed, total, bundle_name)
+                    # Replay logs
+                    if logger and worker_logs:
+                        for level, msg in worker_logs:
+                            if level == "info": logger.info(msg)
+                            elif level == "error": logger.error(msg)
+                            elif level == "success": logger.success(msg)
+                            elif level == "warning": logger.warning(msg)
                     
-                    if logger:
-                        bundle_size_mb = result_path.stat().st_size / (1024 * 1024)
-                        logger.success(f"Bundle {bundle_name}: {bundle_size_mb:.2f} MB")
+                    if result_path:
+                        created_paths.append(result_path)
+                        completed += 1
+                        
+                        bundle_name = Path(bundle_path).name
+                        if progress_callback:
+                            progress_callback(completed, total, bundle_name)
+                        
+                        if logger:
+                            bundle_size_mb = result_path.stat().st_size / (1024 * 1024)
+                            logger.success(f"Bundle {bundle_name}: {bundle_size_mb:.2f} MB")
                         
                 except Exception as e:
                     if logger:

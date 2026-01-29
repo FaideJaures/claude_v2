@@ -99,3 +99,25 @@ DEFAULT_SMALL_FILE_MODE = "zip"
 # Enable pre-APK installation before transfer
 # If enabled, installs and opens the APK from pre-apk/ folder before transfer
 DEFAULT_PRE_APK_ENABLED = True
+
+# === UNLOCK DELAY SETTINGS ===
+# Configurable delays for device unlock (reduced for faster multi-device operations)
+
+# Delay after wake up command (seconds)
+DEFAULT_UNLOCK_WAKE_DELAY = 0.8
+
+# Delay after swipe gesture (seconds)
+DEFAULT_UNLOCK_SWIPE_DELAY = 0.8
+
+# Delay after unlock completion (seconds)
+DEFAULT_UNLOCK_COMPLETE_DELAY = 1.0
+
+# Delay between PIN/password digit inputs (seconds)
+DEFAULT_UNLOCK_DIGIT_DELAY = 0.15
+
+# === FAST MODE SETTINGS ===
+
+# Skip remote file check during resume (for guaranteed fresh transfers)
+# When True, doesn't scan remote directory for existing files
+# Faster but won't skip already-transferred files
+DEFAULT_SKIP_RESUME_CHECK = False

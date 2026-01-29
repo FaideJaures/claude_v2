@@ -87,6 +87,63 @@ class Adb:
             self.logger.error(f"Une erreur inattendue est survenue: {e}")
             return None
 
+    def run_shell_batch(self, commands: list, device_id: str = None, separator: str = " && ") -> list:
+        """
+        Execute multiple shell commands in a single ADB call.
+        
+        Combines commands with the specified separator (default: &&) to reduce
+        ADB call overhead. Useful for bulk operations like mkdir, chmod, etc.
+        
+        Args:
+            commands: List of shell command strings (without 'shell' prefix)
+            device_id: Target device identifier
+            separator: Command separator (default " && " for sequential execution)
+            
+        Returns:
+            Combined output lines from all commands, or None on error
+            
+        Example:
+            adb.run_shell_batch([
+                "mkdir -p /sdcard/folder1",
+                "mkdir -p /sdcard/folder2",
+                "mkdir -p /sdcard/folder3"
+            ], device_id)
+        """
+        if not commands:
+            return []
+        
+        # Escape each command and combine
+        combined = separator.join(commands)
+        return self.run_command(f'shell "{combined}"', device_id)
+
+    def run_push_batch(self, file_mappings: list, device_id: str = None) -> tuple:
+        """
+        Push multiple files in sequence (not truly parallel, but reduces overhead).
+        
+        For truly parallel push, use ThreadPoolExecutor with individual run_command calls.
+        This method is for when you want simple sequential multi-file push.
+        
+        Args:
+            file_mappings: List of (local_path, remote_path) tuples
+            device_id: Target device identifier
+            
+        Returns:
+            Tuple of (success_count, failed_count, failed_files)
+        """
+        success = 0
+        failed = 0
+        failed_files = []
+        
+        for local_path, remote_path in file_mappings:
+            result = self.run_command(f'push "{local_path}" "{remote_path}"', device_id)
+            if result is not None:
+                success += 1
+            else:
+                failed += 1
+                failed_files.append((local_path, remote_path))
+        
+        return success, failed, failed_files
+
     def terminate_all(self):
         """Terminate all active ADB processes."""
         self._cancelling = True

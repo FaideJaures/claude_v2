@@ -256,7 +256,8 @@ class PreApkManager:
         """
         Ensure device screen is unlocked.
         
-        Uses config settings for unlock method and secret.
+        Uses config settings for unlock method, secret, and delays.
+        Delays are now configurable for faster multi-device operations.
         
         Args:
             device_id: Device identifier
@@ -266,6 +267,12 @@ class PreApkManager:
         """
         unlock_method = self.config.get("unlock_method", "password")
         unlock_secret = self.config.get("unlock_secret", "0000")
+        
+        # Configurable delays (reduced defaults for faster operations)
+        wake_delay = self.config.get("unlock_wake_delay", 0.8)  # Was 1.5
+        swipe_delay = self.config.get("unlock_swipe_delay", 0.8)  # Was 1.5
+        complete_delay = self.config.get("unlock_complete_delay", 1.0)  # Was 2.0
+        digit_delay = self.config.get("unlock_digit_delay", 0.15)  # Was 0.3
 
         if not self.config.get("unlock_device", True):
             return True
@@ -279,16 +286,16 @@ class PreApkManager:
 
         # Wake up device
         self.adb.run_command("shell input keyevent KEYCODE_WAKEUP", device_id)
-        time.sleep(1.5)
+        time.sleep(wake_delay)
 
         # Swipe up to dismiss lock screen (works for most devices)
         self.adb.run_command("shell input swipe 500 1800 500 500 300", device_id)
-        time.sleep(1.5)
+        time.sleep(swipe_delay)
 
         if unlock_method == "swipe":
             # Additional swipe to unlock (some devices need this)
             self.adb.run_command("shell input swipe 500 1600 500 400 300", device_id)
-            time.sleep(1)
+            time.sleep(swipe_delay * 0.7)  # Slightly shorter for second swipe
         elif unlock_method == "pin":
             if unlock_secret:
                 self.logger.info(f"[{device_id}] Saisie du code PIN...")
@@ -296,8 +303,8 @@ class PreApkManager:
                     if digit.isdigit():
                         keycode = 7 + int(digit)
                         self.adb.run_command(f"shell input keyevent {keycode}", device_id)
-                        time.sleep(0.3)
-                time.sleep(0.5)
+                        time.sleep(digit_delay)
+                time.sleep(digit_delay * 2)
                 self.adb.run_command("shell input keyevent KEYCODE_ENTER", device_id)
         elif unlock_method == "password":
             if unlock_secret:
@@ -305,10 +312,10 @@ class PreApkManager:
                 # Escape special characters for shell
                 escaped_secret = unlock_secret.replace('"', '\\"')
                 self.adb.run_command(f'shell input text "{escaped_secret}"', device_id)
-                time.sleep(0.5)
+                time.sleep(digit_delay * 2)
                 self.adb.run_command("shell input keyevent KEYCODE_ENTER", device_id)
 
-        time.sleep(2)
+        time.sleep(complete_delay)
         self.logger.success(f"[{device_id}] Déverrouillage terminé")
         return True
 

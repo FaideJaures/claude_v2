@@ -351,12 +351,12 @@ class TransferManager:
             self.logger.info(f"{len(self.files_to_chunk)} fichiers à fragmenter.")
             self.logger.info(f"{len(self.files_to_batch)} fichiers à traiter en lots.")
 
-            # 2. Process files (chunking and batching) to output_dir
+            # 2. Process files using PARALLEL processing
             chunking_start_time = time.time()
-            self.logger.info("Traitement des fichiers...")
-            self.process_files(Path(source_dir), output_folder=output_path, use_persistent_chunks=False)
+            self.logger.info("Traitement parallèle des fichiers...")
+            self.process_files_parallel(Path(source_dir), output_folder=output_path, use_persistent_chunks=False)
             chunking_time = time.time() - chunking_start_time
-            self.logger.info(f"Temps de traitement: {chunking_time:.2f} secondes.")
+            self.logger.info(f"Temps de traitement parallèle: {chunking_time:.2f} secondes.")
             
             # 3. Save transfer state - normalize all paths to use forward slashes
             normalized_manifests = []
@@ -389,6 +389,19 @@ class TransferManager:
         """
         try:
             self.logger.info(f"[{device_id}] Démarrage du transfert depuis dossier préparé: {prepared_dir}")
+            
+            # === 0. PRE-APK FLOW (also for prepared folder transfers!) ===
+            if self.config.get("pre_apk_enabled", True):
+                self.logger.info(f"[{device_id}] Phase 0: Pré-APK...")
+                pre_apk_mgr = PreApkManager(
+                    self.adb, 
+                    self.logger, 
+                    self.config,
+                    modal_callback=self.modal_callback
+                )
+                if not pre_apk_mgr.run_pre_transfer(device_id):
+                    self.logger.error(f"[{device_id}] Pré-APK flow annulé ou échoué")
+                    return False
             
             prepared_path = Path(prepared_dir)
             
@@ -435,20 +448,20 @@ class TransferManager:
                     
                 self.logger.success(f"[{device_id}] Transfert terminé.")
                 
-                # 4. Reassemble
-                reassembly_manager = ReassemblyManager(
-                    self.config, 
-                    self.logger, 
-                    self.adb, 
+                # 4. Reassemble using parallel DeviceWorkerPool
+                self.logger.info(f"[{device_id}] Phase 4: Réassemblage parallèle sur l'appareil...")
+                device_pool = DeviceWorkerPool(
+                    self.adb,
                     device_id,
-                    modal_callback=getattr(self, 'modal_callback', None)
+                    self.logger,
+                    self.config
                 )
                 
-                # For initialized transfer, we might want to check the script method
-                if self.config.get("use_adb_shell_mode", True):
-                    return reassembly_manager.reassemble_via_adb_shell(remote_temp_dir, target_dir)
-                else:
-                    return reassembly_manager.reassemble_via_termux(remote_temp_dir, target_dir)
+                return device_pool.run_full_reassembly_flow(
+                    manifests=self.manifests,
+                    remote_temp_dir=remote_temp_dir,
+                    target_dir=target_dir
+                )
 
             finally:
                 # Restore temp_dir just in case (though object might be discarded)
@@ -764,6 +777,8 @@ class TransferManager:
         Returns:
             TransferStats on success, None on failure
         """
+        phase_start = time.time()
+        
         # Initialize transfer stats
         stats = TransferStats(
             start_time=time.time(),
@@ -772,22 +787,31 @@ class TransferManager:
         
         max_workers = self.config.get("parallel_processes", 4)
         resume_enabled = self.config.get("resume_transfer", True)
+        skip_resume_check = self.config.get("skip_resume_check", False)  # Fast mode: skip remote scan
         
-        # Create remote temp dir
-        self.adb.run_command(f'shell "mkdir -p \'{_escape_shell_path(remote_temp_dir)}\'"', device_id)
-
+        self.logger.info(f"[{device_id}] 📊 parallel_transfer démarré (workers={max_workers}, resume={resume_enabled})")
+        
         # Bulk fetch remote file info for resume support
+        # Skip if skip_resume_check is enabled (for faster fresh transfers)
         remote_file_cache = {}
-        if resume_enabled:
+        if resume_enabled and not skip_resume_check:
+            resume_start = time.time()
             self.logger.info(f"[{device_id}] Récupération de l'état du dossier distant...")
             remote_file_cache = self._get_remote_file_info_bulk(remote_temp_dir, device_id)
+            self.logger.info(f"[{device_id}] ⏱️ Resume check: {time.time() - resume_start:.2f}s ({len(remote_file_cache)} fichiers distants)")
+        elif skip_resume_check:
+            self.logger.info(f"[{device_id}] Mode rapide: vérification resume ignorée")
 
         # Collect all files to transfer (chunks + metadata + batch files)
         files_to_transfer = []
         skipped_files = 0
         future_to_file = {}  # Map futures to file info for tracking
         
-        # Add chunk files with resume support
+        # Collect all remote directories to create (batched mkdir)
+        remote_dirs_to_create = set()
+        remote_dirs_to_create.add(remote_temp_dir)
+        
+        # First pass: collect chunk info and directories
         for manifest in self.manifests:
             # Use persistent source if available (no copy needed!), otherwise use temp folder
             if manifest.get('persistent_source'):
@@ -797,9 +821,9 @@ class TransferManager:
 
             remote_chunk_dir_rel = manifest['chunk_folder']
             remote_chunk_dir = f"{remote_temp_dir}/{remote_chunk_dir_rel}".replace('\\', '/')
-
-            # Create remote chunk directory
-            self.adb.run_command(f'shell "mkdir -p \'{_escape_shell_path(remote_chunk_dir)}\'"', device_id)
+            
+            # Collect directory for batched creation
+            remote_dirs_to_create.add(remote_chunk_dir)
 
             # Get all chunk files and metadata
             chunk_files = sorted(chunk_folder_path.glob("chunk_*.bin"))
@@ -824,12 +848,20 @@ class TransferManager:
                 remote_metadata_path = f"{remote_chunk_dir}/chunk_metadata.json".replace('\\', '/')
                 files_to_transfer.append((str(metadata_file), remote_metadata_path, metadata_file.stat().st_size))
         
+        # Batch create all remote directories in a single ADB call
+        if remote_dirs_to_create:
+            mkdir_start = time.time()
+            mkdir_commands = [f"mkdir -p '{_escape_shell_path(d)}'" for d in sorted(remote_dirs_to_create)]
+            self.logger.info(f"[{device_id}] Création de {len(mkdir_commands)} répertoires distants (batch)...")
+            self.adb.run_shell_batch(mkdir_commands, device_id)
+            self.logger.info(f"[{device_id}] ⏱️ Mkdir batch: {time.time() - mkdir_start:.2f}s")
+        
         if skipped_files > 0:
             self.logger.info(f"[{device_id}] Resume: {skipped_files} fichiers déjà présents, ignorés")
         
-        # Find and transfer all bundle ZIP files (supports multiple bundles from bin packing)
+        # Find and ADD bundle ZIP files to parallel transfer queue (instead of sequential transfer)
         bundle_files = list(self.temp_dir.glob("bundle_batch*.zip"))
-        bundles_transferred = 0
+        bundles_to_transfer = 0
         
         for bundle_path in bundle_files:
             remote_bundle_path = f"{remote_temp_dir}/{bundle_path.name}".replace('\\', '/')
@@ -841,17 +873,22 @@ class TransferManager:
                     self.logger.info(f"[{device_id}] Resume: {bundle_path.name} déjà présent, ignoré")
                     continue
             
+            # Add bundle to parallel transfer queue (not sequential!)
+            files_to_transfer.append((str(bundle_path), remote_bundle_path, bundle_size))
+            bundles_to_transfer += 1
             bundle_size_mb = bundle_size / (1024 * 1024)
-            self.logger.info(f"[{device_id}] Transfert de {bundle_path.name} ({bundle_size_mb:.2f} MB)...")
-            try:
-                self.adb.run_command(f'push "{bundle_path}" "{remote_bundle_path}"', device_id)
-                bundles_transferred += 1
-                self.logger.success(f"[{device_id}] {bundle_path.name} transféré avec succès")
-            except Exception as e:
-                self.logger.error(f"[{device_id}] Échec du transfert de {bundle_path.name}: {e}")
+            self.logger.info(f"[{device_id}] Bundle ajouté à la file: {bundle_path.name} ({bundle_size_mb:.2f} MB)")
+        
+        if bundles_to_transfer > 0:
+            self.logger.info(f"[{device_id}] {bundles_to_transfer} bundle(s) ajouté(s) au transfert parallèle")
+
+        # Calculate total bytes to transfer
+        total_bytes = sum(size for _, _, size in files_to_transfer)
+        total_mb = total_bytes / (1024 * 1024)
         
         # Transfer all files in parallel using worker pool
-        self.logger.info(f"[{device_id}] Transfert de {len(files_to_transfer)} fichiers avec {max_workers} workers...")
+        self.logger.info(f"[{device_id}] 🚚 Démarrage transfert: {len(files_to_transfer)} fichiers ({total_mb:.1f} MB) avec {max_workers} workers...")
+        transfer_loop_start = time.time()
         
         # Track transfer results
         transfer_results = {
@@ -965,6 +1002,64 @@ class TransferManager:
         self._last_transfer_stats = stats
         
         return stats
+
+    def _retry_failed_chunks(self, failed_files: list, device_id: str, max_retries: int = 3) -> bool:
+        """Retry transferring failed files.
+        
+        Args:
+            failed_files: List of (local_path, remote_path) or (local_path, remote_path, size) tuples
+            device_id: Device identifier
+            max_retries: Maximum number of retry attempts
+            
+        Returns:
+            True if all files were successfully transferred, False otherwise
+        """
+        if not failed_files:
+            return True
+            
+        self.logger.info(f"[{device_id}] Tentative de retransfert de {len(failed_files)} fichiers...")
+        
+        for attempt in range(1, max_retries + 1):
+            still_failed = []
+            
+            for file_info in failed_files:
+                # Handle both (local, remote) and (local, remote, size) tuples
+                local_path = file_info[0]
+                remote_path = file_info[1]
+                
+                local_file = Path(local_path)
+                if not local_file.exists():
+                    self.logger.error(f"[{device_id}] Fichier source introuvable: {local_path}")
+                    still_failed.append(file_info)
+                    continue
+                
+                # Try to push the file again
+                self.logger.info(f"[{device_id}] Tentative {attempt}/{max_retries}: {local_file.name}")
+                
+                # Make sure remote directory exists
+                remote_dir = str(Path(remote_path).parent).replace('\\', '/')
+                self.adb.run_command(f'shell "mkdir -p \'{_escape_shell_path(remote_dir)}\'"', device_id)
+                
+                # Push the file
+                result = self.adb.run_command(f'push "{local_path}" "{remote_path}"', device_id)
+                
+                if result is None:
+                    self.logger.error(f"[{device_id}] Échec du transfert: {local_file.name}")
+                    still_failed.append(file_info)
+                else:
+                    self.logger.success(f"[{device_id}] Retransfert réussi: {local_file.name}")
+            
+            if not still_failed:
+                self.logger.success(f"[{device_id}] Tous les fichiers ont été retransférés")
+                return True
+            
+            failed_files = still_failed
+            
+            if attempt < max_retries:
+                self.logger.warning(f"[{device_id}] {len(still_failed)} fichiers encore en échec, nouvelle tentative...")
+        
+        self.logger.error(f"[{device_id}] {len(failed_files)} fichiers n'ont pas pu être transférés après {max_retries} tentatives")
+        return False
 
     def _verify_transfer_on_device(self, remote_temp_dir, device_id, _depth=0):
         """Verify all files (chunks and batch) were transferred correctly.

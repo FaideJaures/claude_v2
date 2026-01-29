@@ -259,6 +259,58 @@ class SettingsWindow(tk.Toplevel):
         tk.Entry(timeout_frame, textvariable=self.reassembly_timeout, width=10).pack(side=tk.RIGHT)
 
         # ═══════════════════════════════════════════════════════════════
+        # SECTION 6: PERFORMANCE AVANCÉE (WORKERS)
+        # ═══════════════════════════════════════════════════════════════
+        section_workers = tk.Label(scrollable_frame, text="━━━ Performance Avancée ━━━", font=("Arial", 11, "bold"), fg="#795548")
+        section_workers.pack(pady=(20, 10))
+
+        # Chunking Workers
+        chunk_workers_frame = tk.Frame(scrollable_frame)
+        chunk_workers_frame.pack(pady=5, padx=20, fill=tk.X)
+        tk.Label(chunk_workers_frame, text="Workers Chunking (PC):").pack(side=tk.LEFT)
+        self.chunking_workers = tk.IntVar(value=self.config.get("chunking_workers", DEFAULT_CHUNKING_WORKERS))
+        tk.Spinbox(chunk_workers_frame, from_=1, to=32, textvariable=self.chunking_workers, width=5).pack(side=tk.RIGHT)
+
+        # Zipping Workers
+        zip_workers_frame = tk.Frame(scrollable_frame)
+        zip_workers_frame.pack(pady=5, padx=20, fill=tk.X)
+        tk.Label(zip_workers_frame, text="Workers Zipping (PC):").pack(side=tk.LEFT)
+        self.zipping_workers = tk.IntVar(value=self.config.get("zipping_workers", DEFAULT_ZIPPING_WORKERS))
+        tk.Spinbox(zip_workers_frame, from_=1, to=32, textvariable=self.zipping_workers, width=5).pack(side=tk.RIGHT)
+
+        # Reassembly Workers
+        reasm_workers_frame = tk.Frame(scrollable_frame)
+        reasm_workers_frame.pack(pady=5, padx=20, fill=tk.X)
+        tk.Label(reasm_workers_frame, text="Workers Réassemblage (Device):").pack(side=tk.LEFT)
+        self.reassembly_workers = tk.IntVar(value=self.config.get("reassembly_workers", DEFAULT_REASSEMBLY_WORKERS))
+        tk.Spinbox(reasm_workers_frame, from_=1, to=32, textvariable=self.reassembly_workers, width=5).pack(side=tk.RIGHT)
+
+        # Unzip Workers
+        unzip_workers_frame = tk.Frame(scrollable_frame)
+        unzip_workers_frame.pack(pady=5, padx=20, fill=tk.X)
+        tk.Label(unzip_workers_frame, text="Workers Unzip (Device):").pack(side=tk.LEFT)
+        self.unzip_workers = tk.IntVar(value=self.config.get("unzip_workers", DEFAULT_UNZIP_WORKERS))
+        tk.Spinbox(unzip_workers_frame, from_=1, to=32, textvariable=self.unzip_workers, width=5).pack(side=tk.RIGHT)
+
+        # Final Move Workers
+        move_workers_frame = tk.Frame(scrollable_frame)
+        move_workers_frame.pack(pady=5, padx=20, fill=tk.X)
+        tk.Label(move_workers_frame, text="Workers Déplacement (Device):").pack(side=tk.LEFT)
+        self.final_move_workers = tk.IntVar(value=self.config.get("final_move_workers", DEFAULT_FINAL_MOVE_WORKERS))
+        tk.Spinbox(move_workers_frame, from_=1, to=32, textvariable=self.final_move_workers, width=5).pack(side=tk.RIGHT)
+
+        # Small File Mode
+        small_mode_frame = tk.Frame(scrollable_frame)
+        small_mode_frame.pack(pady=5, padx=20, fill=tk.X)
+        tk.Label(small_mode_frame, text="Mode Petits Fichiers:").pack(side=tk.LEFT)
+        self.small_file_mode = tk.StringVar(value=self.config.get("small_file_mode", DEFAULT_SMALL_FILE_MODE))
+        tk.OptionMenu(small_mode_frame, self.small_file_mode, "zip", "batch_push").pack(side=tk.RIGHT)
+
+        # Pre-APK Enabled
+        self.pre_apk_enabled = tk.BooleanVar(value=self.config.get("pre_apk_enabled", DEFAULT_PRE_APK_ENABLED))
+        tk.Checkbutton(scrollable_frame, text="Activer installation Pre-APK", variable=self.pre_apk_enabled).pack(anchor="w", padx=20, pady=3)
+
+        # ═══════════════════════════════════════════════════════════════
         # SAVE BUTTON
         # ═══════════════════════════════════════════════════════════════
         save_button = tk.Button(scrollable_frame, text="💾 Enregistrer", command=self.save_and_close, 
@@ -295,8 +347,18 @@ class SettingsWindow(tk.Toplevel):
         self.config["refresh_interval"] = self.refresh_interval.get()
         self.config["auto_connect_wifi"] = self.auto_connect_wifi.get()
         
+        # Workers & Performance
+        self.config["chunking_workers"] = self.chunking_workers.get()
+        self.config["zipping_workers"] = self.zipping_workers.get()
+        self.config["reassembly_workers"] = self.reassembly_workers.get()
+        self.config["unzip_workers"] = self.unzip_workers.get()
+        self.config["final_move_workers"] = self.final_move_workers.get()
+        self.config["small_file_mode"] = self.small_file_mode.get()
+        self.config["pre_apk_enabled"] = self.pre_apk_enabled.get()
+        
         self.master.save_config()
         self.destroy()
+
 
 class Application(tk.Frame):
     def __init__(self, master=None):
@@ -423,6 +485,15 @@ class Application(tk.Frame):
         config.setdefault("refresh_interval", DEFAULT_REFRESH_INTERVAL)
         config.setdefault("auto_connect_wifi", DEFAULT_AUTO_CONNECT_WIFI)
         config.setdefault("saved_wifi_ips", [])
+        
+        # Workers & Performance defaults
+        config.setdefault("chunking_workers", DEFAULT_CHUNKING_WORKERS)
+        config.setdefault("zipping_workers", DEFAULT_ZIPPING_WORKERS)
+        config.setdefault("reassembly_workers", DEFAULT_REASSEMBLY_WORKERS)
+        config.setdefault("unzip_workers", DEFAULT_UNZIP_WORKERS)
+        config.setdefault("final_move_workers", DEFAULT_FINAL_MOVE_WORKERS)
+        config.setdefault("small_file_mode", DEFAULT_SMALL_FILE_MODE)
+        config.setdefault("pre_apk_enabled", DEFAULT_PRE_APK_ENABLED)
 
         return config
 
@@ -1192,83 +1263,156 @@ class Application(tk.Frame):
         use_transfer_folder = self.config.get("use_transfer_folder", False)
         
         def run_transfer():
-            success = False
-            device_id = devices[0]
+            """
+            UNIFIED TRANSFER LOGIC
             
-            # Setup progress bars for single device
+            All transfers (single device, multi-device, prepared folder, standard)
+            go through the same parallel logic for consistency and maintainability.
+            """
+            import time as time_module
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            import copy
+            
+            transfer_start = time_module.time()
+            
+            # Setup progress bars for all devices
             self._create_device_progress_bars(devices)
             self._update_overall_progress(0)
-            self._update_device_progress(device_id, 0, "Démarrage...")
             
-            try:
-                # Setup progress callback for real-time updates
-                def update_progress(percent, status):
-                    self._update_device_progress(device_id, percent, status)
-                    self._update_overall_progress(percent)
+            self.logger.info(f"=== TRANSFERT UNIFIÉ: {len(devices)} appareil(s) ===")
+            self.logger.info(f"Mode: {'Dossier préparé' if use_transfer_folder else 'Standard'}")
+            
+            # Determine the source for transfer
+            if use_transfer_folder:
+                transfer_folder = self.folder_manager.get_transfer_folder_path(source)
+                self.logger.info(f"Source: {transfer_folder}")
+            else:
+                transfer_folder = None
+                self.logger.info(f"Source: {source}")
+            
+            # Results tracking
+            results = {}
+            
+            def transfer_to_device(device_id):
+                """Transfer to a single device - used by all devices in parallel."""
+                device_start = time_module.time()
+                self.logger.info(f"[{device_id}] ⏱️ Démarrage thread à T+0.000s")
                 
-                self.transfer_manager.progress_callback = update_progress
-                
-                if use_transfer_folder:
-                    transfer_folder = self.folder_manager.get_transfer_folder_path(source)
-                    self._update_device_progress(device_id, 10, "Préparation...")
-                    self._update_overall_progress(10)
-                    # Use specialized transfer method
-                    success = self.transfer_manager.transfer_from_prepared_folder(transfer_folder, target, device_id)
-                else:
-                    # Standard transfer - now uses parallel workers
-                    if len(devices) == 1:
-                        self._update_device_progress(device_id, 10, "Préparation...")
-                        self._update_overall_progress(10)
-                        success = self.transfer_manager.start_transfer_parallel(source, target, device_id)
+                try:
+                    # Update progress
+                    self._update_device_progress(device_id, 5, "Initialisation...")
+                    
+                    # Create device-specific transfer manager
+                    from core.transfer import TransferManager
+                    device_transfer_mgr = TransferManager(self.config, self.logger)
+                    
+                    if use_transfer_folder:
+                        # Use prepared folder transfer
+                        self.logger.info(f"[{device_id}] Transfert depuis dossier préparé...")
+                        self._update_device_progress(device_id, 10, "Transfert...")
+                        success = device_transfer_mgr.transfer_from_prepared_folder(
+                            str(transfer_folder), target, device_id
+                        )
                     else:
-                        self.run_multi_device_transfer(source, target, devices)
-                        return  # Multi-device handles its own cleanup
-                
-                # Update progress on completion
-                if success:
-                    self._update_device_progress(device_id, 80, "Principal OK ✓")
-                    self._update_overall_progress(80)
+                        # Use standard parallel transfer
+                        self.logger.info(f"[{device_id}] Transfert parallèle standard...")
+                        self._update_device_progress(device_id, 10, "Transfert...")
+                        success = device_transfer_mgr.start_transfer_parallel(
+                            source, target, device_id
+                        )
                     
-                    # Process subsidiary folders if any
-                    if self.subsidiaries:
-                        self.logger.info(f"=== Transfert de {len(self.subsidiaries)} subsidiaire(s) ===")
-                        for i, sub in enumerate(self.subsidiaries):
-                            sub_target = f"{target}/{sub.injection_path}".replace("//", "/").rstrip("/")
-                            self.logger.info(f"[{i+1}/{len(self.subsidiaries)}] {sub.name} → {sub.injection_path or '(racine)'}")
-                            self._update_device_progress(device_id, 80 + int((i / len(self.subsidiaries)) * 20), f"Sub: {sub.name}")
-                            
-                            try:
-                                if sub.has_prepared:
-                                    self.logger.info(f"  Utilisation de {sub.name}_for_transfer")
-                                    self.transfer_manager.transfer_from_prepared_folder(
-                                        str(sub.prepared_folder), sub_target, device_id
-                                    )
-                                else:
-                                    self.logger.info(f"  Préparation à la volée de {sub.name}")
-                                    self.transfer_manager.start_transfer_parallel(
-                                        sub.source_path, sub_target, device_id
-                                    )
-                                self.logger.success(f"  {sub.name} transféré avec succès")
-                            except Exception as e:
-                                self.logger.error(f"  Erreur subsidiaire {sub.name}: {e}")
-                        
-                        self.logger.info("=== Tous les subsidiaires transférés ===")
+                    duration = time_module.time() - device_start
                     
-                    self._update_device_progress(device_id, 100, "Terminé ✓")
-                    self._update_overall_progress(100)
-                else:
-                    self._update_device_progress(device_id, 100, "Échoué ✗")
-                    self._update_overall_progress(100)
+                    if success:
+                        self.logger.success(f"[{device_id}] ✅ Terminé en {duration:.1f}s")
+                        self._update_device_progress(device_id, 100, "Terminé ✓")
+                    else:
+                        self.logger.error(f"[{device_id}] ❌ Échec après {duration:.1f}s")
+                        self._update_device_progress(device_id, 100, "Échoué ✗")
                     
-            except Exception as e:
-                self.logger.error(f"Erreur lors du transfert: {e}")
-                self._update_device_progress(device_id, 0, "Erreur")
-                success = False
+                    return device_id, success
+                    
+                except Exception as e:
+                    self.logger.error(f"[{device_id}] Erreur: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    self._update_device_progress(device_id, 100, "Erreur")
+                    return device_id, False
             
-            # Call cleanup with success info for single-device transfers
+            # Execute transfers in parallel for ALL devices
+            try:
+                completed_count = 0
+                success_count = 0
+                
+                with ThreadPoolExecutor(max_workers=len(devices)) as executor:
+                    # Submit all device transfers
+                    self.logger.info(f"🔀 Lancement de {len(devices)} transfert(s) parallèle(s)...")
+                    futures = {
+                        executor.submit(transfer_to_device, device_id): device_id 
+                        for device_id in devices
+                    }
+                    self.logger.info(f"✓ Tous les threads lancés")
+                    
+                    # Wait for completion
+                    for future in as_completed(futures):
+                        device_id, success = future.result()
+                        results[device_id] = success
+                        completed_count += 1
+                        if success:
+                            success_count += 1
+                        
+                        # Update overall progress
+                        overall_progress = int((completed_count / len(devices)) * 100)
+                        self._update_overall_progress(overall_progress)
+                
+                # Process subsidiary folders for successful devices
+                successful_devices = [d for d, s in results.items() if s]
+                
+                if self.subsidiaries and successful_devices:
+                    self.logger.info(f"=== Transfert de {len(self.subsidiaries)} subsidiaire(s) vers {len(successful_devices)} appareil(s) ===")
+                    
+                    for sub in self.subsidiaries:
+                        sub_target = f"{target}/{sub.injection_path}".replace("//", "/").rstrip("/")
+                        self.logger.info(f"Subsidiaire: {sub.name} → {sub.injection_path or '(racine)'}")
+                        
+                        # Transfer subsidiary to all successful devices in parallel
+                        with ThreadPoolExecutor(max_workers=len(successful_devices)) as sub_executor:
+                            def transfer_subsidiary(device_id):
+                                try:
+                                    sub_mgr = TransferManager(self.config, self.logger)
+                                    if sub.has_prepared:
+                                        sub_mgr.transfer_from_prepared_folder(
+                                            str(sub.prepared_folder), sub_target, device_id
+                                        )
+                                    else:
+                                        sub_mgr.start_transfer_parallel(
+                                            sub.source_path, sub_target, device_id
+                                        )
+                                    self.logger.success(f"[{device_id}] {sub.name} transféré")
+                                    return True
+                                except Exception as e:
+                                    self.logger.error(f"[{device_id}] Erreur {sub.name}: {e}")
+                                    return False
+                            
+                            list(sub_executor.map(transfer_subsidiary, successful_devices))
+                    
+                    self.logger.info("=== Subsidiaires terminés ===")
+                
+                total_duration = time_module.time() - transfer_start
+                self.logger.info(f"\n=== RÉSUMÉ ===")
+                self.logger.info(f"Durée totale: {int(total_duration // 60):02d}:{int(total_duration % 60):02d}")
+                self.logger.info(f"Appareils: {success_count}/{len(devices)} réussis")
+                
+            except Exception as e:
+                self.logger.error(f"Erreur globale: {e}")
+                import traceback
+                traceback.print_exc()
+                success_count = 0
+            
+            # Cleanup
             self.master.after(0, lambda: self._cleanup_transfer_ui(
-                success_count=1 if success else 0, 
-                total_count=1
+                success_count=success_count, 
+                total_count=len(devices)
             ))
 
         # Check folder existence if needed
@@ -1299,6 +1443,7 @@ class Application(tk.Frame):
         
         threading.Thread(target=run_transfer, daemon=True).start()
 
+
     def update_timer(self):
         """Update the transfer timer display."""
         if self.timer_running and self.transfer_start_time:
@@ -1313,6 +1458,7 @@ class Application(tk.Frame):
     def run_multi_device_transfer(self, source, target, devices):
         """Run transfer to multiple devices in parallel with per-device worker pools."""
         import time
+        from core.pre_apk_manager import run_pre_apk_on_multiple_devices
 
         # Pause device polling during transfer
         self.is_transferring = True
@@ -1336,6 +1482,33 @@ class Application(tk.Frame):
 
         # Dictionary to track results for each device
         transfer_results = {}
+        
+        # === PHASE 0: PRE-APK (if enabled) ===
+        if self.config.get("pre_apk_enabled", True):
+            self.logger.info("Phase 0: Pré-APK...")
+            
+            # Use parallel pre-apk manager
+            pre_apk_results = run_pre_apk_on_multiple_devices(
+                self.adb,
+                self.logger,
+                self.config,
+                devices,
+                modal_callback=self.show_device_reassembly_modal
+            )
+            
+            # Check for failures
+            failed_pre_apk = [d for d, success in pre_apk_results.items() if not success]
+            if failed_pre_apk:
+                self.logger.warning(f"Pré-APK échoué pour: {failed_pre_apk}")
+                # We can decide to abort or continue. For now, we continue but log it.
+                # If user cancelled, we should probably stop.
+            
+            # Check for cancellation
+            with self.cancel_lock:
+                if self.cancel_requested:
+                    self.logger.info("Opération annulée par l'utilisateur")
+                    self._cleanup_transfer_ui()
+                    return
 
         # Prepare files once (chunking, batching)
         self.logger.info("Préparation des fichiers...")
@@ -1347,9 +1520,12 @@ class Application(tk.Frame):
                 self.transfer_manager.files_to_batch = []
                 self.transfer_manager.manifests = []
                 
-                # Scan and process files once
+                # Scan files
                 self.transfer_manager.scan_files(source)
-                self.transfer_manager.process_files(Path(source))
+                
+                # Use PARALLEL processing
+                self.logger.info("Traitement parallèle des fichiers...")
+                self.transfer_manager.process_files_parallel(Path(source))
                 
                 self.logger.info(f"Fichiers préparés: {len(self.transfer_manager.manifests)} fichiers fragmentés, {len(self.transfer_manager.files_to_batch)} fichiers groupés")
 
@@ -1363,14 +1539,18 @@ class Application(tk.Frame):
                 # Phase 1: Transfer to all devices in parallel
                 self.logger.info("\nPHASE 1: Transfert parallèle vers tous les appareils...")
                 phase_timestamps["phase1_start"] = datetime.now().isoformat()
+                phase1_start_time = time.time()
 
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor(max_workers=len(devices)) as executor:
                     futures = {}
-                    for device_id in devices:
+                    self.logger.info(f"🔀 Spawn de {len(devices)} threads parallèles...")
+                    for idx, device_id in enumerate(devices):
                         self._update_device_progress(device_id, 0, "Transfert...")
+                        self.logger.info(f"  → Thread {idx+1}/{len(devices)}: {device_id} soumis")
                         future = executor.submit(self._transfer_to_single_device, device_id, temp_dir)
                         futures[future] = device_id
+                    self.logger.info(f"✓ Tous les threads soumis en {time.time() - phase1_start_time:.3f}s")
 
                     # Wait for all transfers to complete
                     for future in concurrent.futures.as_completed(futures):
@@ -1569,38 +1749,82 @@ class Application(tk.Frame):
         self.master.after(1000, self._cleanup_transfer_ui)
 
     def _transfer_to_single_device(self, device_id, temp_dir):
-        """Transfer files to a single device with its own worker pool."""
+        """Transfer files to a single device with its own worker pool.
+        
+        This method is called from run_multi_device_transfer for each device.
+        The temp_dir contains prepared chunks and bundles from the main transfer_manager.
+        
+        Args:
+            device_id: Target device identifier
+            temp_dir: Path to shared temp directory containing prepared files
+        """
+        import time as time_module
+        thread_start = time_module.time()
+        
         try:
-            self.logger.info(f"[{device_id}] Démarrage du transfert...")
+            self.logger.info(f"[{device_id}] ⏱️ Thread démarré à T+0.000s")
             
-            # Check and install Termux if needed (moved from startup to transfer start)
-            from utils.termux import TermuxInstaller
-            installer = TermuxInstaller(self.logger, self.adb)
+            # Skip Termux check if using ADB shell mode (default)
+            use_adb_shell_mode = self.config.get("use_adb_shell_mode", True)
             
-            if not installer.is_termux_installed(device_id):
-                self.logger.info(f"[{device_id}] Termux non installé, installation en cours...")
-                if not installer.install_termux(device_id):
-                    self.logger.error(f"[{device_id}] Échec de l'installation de Termux. Transfert annulé.")
-                    return False
-                self.logger.success(f"[{device_id}] Termux installé avec succès")
-            else:
-                self.logger.info(f"[{device_id}] Termux déjà installé")
+            if not use_adb_shell_mode:
+                from utils.termux import TermuxInstaller
+                installer = TermuxInstaller(self.logger, self.adb)
+                
+                termux_start = time_module.time()
+                if not installer.is_termux_installed(device_id):
+                    self.logger.info(f"[{device_id}] Termux non installé, installation en cours...")
+                    if not installer.install_termux(device_id):
+                        self.logger.error(f"[{device_id}] Échec de l'installation de Termux. Transfert annulé.")
+                        return False
+                    self.logger.success(f"[{device_id}] Termux installé avec succès")
+                else:
+                    self.logger.info(f"[{device_id}] Termux déjà installé")
+                self.logger.info(f"[{device_id}] ⏱️ Termux check: {time_module.time() - termux_start:.2f}s")
             
-            # Create device-specific transfer manager
+            # Create device-specific transfer manager with COPIED state (not shared references)
             from core.transfer import TransferManager
+            import copy
+            
+            setup_start = time_module.time()
             transfer_mgr = TransferManager(self.config, self.logger)
-            transfer_mgr.temp_dir = Path(temp_dir)
-            transfer_mgr.manifests = self.transfer_manager.manifests
-            transfer_mgr.files_to_batch = self.transfer_manager.files_to_batch
+            transfer_mgr.temp_dir = Path(temp_dir)  # Shared temp_dir is OK (read-only after preparation)
+            
+            # Deep copy manifests to avoid any potential race conditions
+            # Each thread gets its own copy of the manifest list
+            transfer_mgr.manifests = copy.deepcopy(self.transfer_manager.manifests)
+            
+            # files_to_batch doesn't need copy - it's only used during preparation, not transfer
+            # But we clear it anyway for safety
+            transfer_mgr.files_to_batch = []
+            
+            self.logger.info(f"[{device_id}] ⏱️ Setup: {time_module.time() - setup_start:.2f}s (T+{time_module.time() - thread_start:.2f}s)")
             
             # Transfer with per-device parallelism
             remote_temp_dir = self.config.get("remote_temp_dir", "/sdcard/transfer_temp")
-            transfer_mgr.parallel_transfer(remote_temp_dir, device_id)
             
+            transfer_start = time_module.time()
+            self.logger.info(f"[{device_id}] 🚀 Début transfert ADB à T+{transfer_start - thread_start:.2f}s")
+            
+            result = transfer_mgr.parallel_transfer(remote_temp_dir, device_id)
+            
+            transfer_duration = time_module.time() - transfer_start
+            total_duration = time_module.time() - thread_start
+            
+            if result is None:
+                self.logger.error(f"[{device_id}] ❌ Transfert échoué après {transfer_duration:.2f}s")
+                return False
+            
+            self.logger.success(f"[{device_id}] ✅ Transfert terminé en {transfer_duration:.2f}s (total: {total_duration:.2f}s)")
             return True
+            
         except Exception as e:
             self.logger.error(f"[{device_id}] Erreur: {e}")
+            import traceback
+            traceback.print_exc()
             return False
+
+
 
     def start_termux_workflow(self):
         """Run Termux setup workflow only (no file transfer)."""
